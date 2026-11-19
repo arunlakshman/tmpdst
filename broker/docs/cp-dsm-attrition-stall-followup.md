@@ -145,7 +145,7 @@ After `cfca8b6`:
 - Bridge CP boundary knobs are **not** zeroed.  
 - `MaxAttempts = 16` for kafka-log.  
 - Bridge `CallerTimeout = 1500ms`; logstore `CallerTimeout = 500ms` (must stay above ApplyLatency SlowMax ~200ms so a slow Put is not a false MaybeApplied, but below the bridge so PutFail can retry inside one CommitSegment).  
-- Settling 25s / Settle 20s (extended for stacked retries).  
+- Heal 25s / Drain 20s (extended for stacked retries).  
 - K floored to `{2,4,8}` (K=1 + PutLost could stall every commit behind one lost Put for the whole bridge timeout).  
 - Takeover floored to `{600,900,1500}ms` (above heartbeat so a healthy primary is not displaced).  
 - Trim-heavy profile keeps more slots (`KeepSlots` 16/32) for PutFail lag.
@@ -196,7 +196,7 @@ Do **not** flip all three on day one. Prior art: Put coins alone found a wedge.
 
 1. Flip the Process flag.  
 2. Reason about interaction with softCrash: process kill discards the machine entirely; in-flight LogAppends may still land on logstore (same class as old "Puts on the wire still land"). Bridge + broker retry must retarget or replay keys (fold window).  
-3. Watch Settling liveness (`internal/verify/simulator/kafka` liveness invariant / `MaxQuietLatency`): longer Settling/Settle may be needed again.  
+3. Watch Heal liveness (`internal/verify/simulator/kafka` liveness invariant / `MaxQuietLatency`): longer Heal/Drain may be needed again.  
 4. Re-run the same bar; consider a longer campaign (e.g. 2000 seeds) if 300 is flaky only under attrition.  
 5. Confirm `faultCoverage` still makes sense (broker and/or CP attrition).
 
@@ -222,7 +222,7 @@ Do **not** flip all three on day one. Prior art: Put coins alone found a wedge.
 
 `docs/sim-log-engine.md` still says coverage under attrition is part of CP-DSM-8 live lanes - that is **aspirational** until this follow-up lands. Align ExpectReachable with what the campaign can actually hit once knobs are on.
 
-`machine.Config` comment: `Fault()` suppresses stall/crash after `EnterRecovery` - Settling should not keep injecting new cooperative faults; verify that still holds when probs are non-zero.
+`machine.Config` comment: `Fault()` suppresses stall/crash after `EnterRecovery`  - Heal should not keep injecting new cooperative faults; verify that still holds when probs are non-zero.
 
 ---
 
@@ -234,7 +234,7 @@ Do **not** flip all three on day one. Prior art: Put coins alone found a wedge.
 | Commit never applies after stall | Appender stalled; standby never promotes | `TakeoverAfter` vs heartbeat; `lastOtherAt` / `lastPullOK`; bridge failover hop |
 | Double appender / split brain answers | Roles advisory only; both think active | decision 51; slot put as fence; failback on lower-rank writer |
 | Nondeterministic trace hash | Unsorted map walk on retarget/refuse; Fault draw order | Sort ReqIDs (already done in retarget/refuse); swarm draw order in `swarm` then `swarmLog` |
-| Settling liveness failures | Chaos faults still landing; CP down too long | Phases Settling/Settle lengths; MaxDead; RecoveryDelay / DownDur |
+| Heal liveness failures | Chaos faults still landing; CP down too long | Phases Heal/Drain lengths; MaxDead; RecoveryDelay / DownDur |
 | False MaybeApplied under load | Logstore CallerTimeout <= slow ApplyLatency | Keep logstore timeout &lt; bridge and &gt; SlowMax (~200ms) |
 | Campaign "green" but stall never fires | Still hardcoded 0 in `control_plane.go` or zeroed in `swarmLog` | section 5 checklist - both sites must be live |
 

@@ -457,16 +457,21 @@ func (w *World) foldState() {
 	}
 }
 
-// hashCache is a cached state hash. It is valid while ok.
+// hashCache is a cached state hash. It is valid while hashValid.
 type hashCache struct {
-	sum uint64
-	ok  bool
+	sum       uint64
+	hashValid bool
+}
+
+// invalidateHash marks the cached StateHash stale so the next fold recomputes it.
+func (c *hashCache) invalidateHash() {
+	c.hashValid = false
 }
 
 // cachedHash brings c up to date. With Config.VerifyHashes it also checks a
 // valid cache against a fresh hash. It reports false when the run halted.
 func (w *World) cachedHash(what string, c *hashCache, full func() uint64) bool {
-	if c.ok && !w.cfg.VerifyHashes {
+	if c.hashValid && !w.cfg.VerifyHashes {
 		return true
 	}
 	var sum uint64
@@ -474,12 +479,12 @@ func (w *World) cachedHash(what string, c *hashCache, full func() uint64) bool {
 		w.halted = true
 		return false
 	}
-	if c.ok && sum != c.sum {
+	if c.hashValid && sum != c.sum {
 		w.Fail(FailProtocol, "stale_state_hash", what+": the state changed while the kernel did not call it")
 		w.halted = true
 		return false
 	}
-	c.sum, c.ok = sum, true
+	c.sum, c.hashValid = sum, true
 	return true
 }
 

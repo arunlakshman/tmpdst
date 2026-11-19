@@ -51,7 +51,7 @@ func (w *stubWorkload) Quiescent() bool { return w.quiescent }
 func quickPlan(seed uint64) Plan {
 	return Plan{
 		Seed:         seed,
-		Phases:       kernel.Phases{Chaos: 2 * machine.Second, Settling: machine.Second, Settle: machine.Second},
+		Phases:       kernel.Phases{Faults: 2 * machine.Second, Heal: machine.Second, Drain: machine.Second},
 		QuiesceEvery: 500 * machine.Millisecond,
 		Settings:     Settings{RecoveryDelay: [2]machine.Duration{100 * machine.Millisecond, 200 * machine.Millisecond}},
 	}
@@ -97,13 +97,13 @@ func TestAdaptFactoryKeepsNil(t *testing.T) {
 func TestDriverAdapterRoutesPhaseChanges(t *testing.T) {
 	w := &stubWorkload{stubMachine: stubMachine{seen: new([]stepRecord)}}
 	d := driverAdapter{w}
-	ev, ok := phaseEvent(kernel.PhaseRecover)
+	ev, ok := phaseEvent(kernel.PhaseDrain)
 	if !ok {
 		t.Fatal("phaseEvent gave no input")
 	}
 	d.Step(machine.Now{}, ev)
 	d.Step(machine.Now{}, core.TimerFired{ID: 3, Gen: 1}) // a normal timer
-	if !slices.Equal(w.phases, []kernel.Phase{kernel.PhaseRecover}) {
+	if !slices.Equal(w.phases, []kernel.Phase{kernel.PhaseDrain}) {
 		t.Fatalf("phases = %v", w.phases)
 	}
 	if len(*w.seen) != 1 {
@@ -149,7 +149,7 @@ func TestRunBootsBrokersThenWorkloadAndTellsPhases(t *testing.T) {
 	if _, ok := workloadSeen[0].in.(core.NodeStarted); !ok {
 		t.Errorf("the first workload input was %T", workloadSeen[0].in)
 	}
-	if want := []kernel.Phase{kernel.PhaseRecovering, kernel.PhaseRecover}; !slices.Equal(live.phases, want) {
+	if want := []kernel.Phase{kernel.PhaseHeal, kernel.PhaseDrain}; !slices.Equal(live.phases, want) {
 		t.Errorf("workload heard %v, want %v", live.phases, want)
 	}
 	quiet := c.World.Timeline().Snapshot("sim_quiesce")

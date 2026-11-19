@@ -56,7 +56,7 @@ Two rules in the state machine make this safe:
   a lagging node cannot overwrite a newer checkpoint after the log was trimmed. A MaybeApplied commit Put
 retries the same slot (conditional append); abandoning the slot used to wedge
 `drain` so later commits never applied. `ConfigLog` also raises bridge
-`CallerTimeout`, shortens per-Put logstore timeout, and extends Settling/Settle
+`CallerTimeout`, shortens per-Put logstore timeout, and extends Heal/Drain
 under stacked retries. Log knobs stay on `simulator.LogParams`. Mutants use
 `LogParams.Bug` / `replica.Config.InjectedBug` (and `LogStoreFaults.Bug` for trim-delete; that mutant was removed with decision 62).
 

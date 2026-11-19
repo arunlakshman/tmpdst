@@ -41,7 +41,7 @@
 
 - Result on 2026-11-13, 2000 seeds of `kafka` and 300 seeds of `echo`, in the old tree and in the new tree: these names have 0 checks.
   - "broker: commit deadline exceeded" (Reachable, `kafka`): the commit never runs past its deadline in the preset.
-  - "kafka: a produce still running in Settling is acked" (Always, `kafka`): no produce returns after Settling starts.
+  - "kafka: a produce still running in Heal is acked" (Always, `kafka`): no produce returns after Heal starts.
   - "echo: an offset is acked with one payload" (Always, `echo`): no offset is acked twice.
 - The old report never listed them (it listed only the Sometimes and Reachable names in its hand list). To keep the new report equal, they are declared with `assert.NewReachableNotExpected` and `assert.NewAlwaysOnFailure`, so the report does not call them "never reached" or "never checked". The code and the rules are unchanged.
 - A gap stays a gap (decision 5): no scenario, fault or check was added. Later: a preset where the commit is slow enough to pass its deadline, and a workload that sends the same offset twice.

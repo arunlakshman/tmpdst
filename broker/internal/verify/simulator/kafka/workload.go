@@ -162,16 +162,16 @@ func (w *Workload) Quiescent() bool {
 // Step implements core.StateMachine.
 func (w *Workload) Step(event core.Event) []core.Action { return w.loop.Step(event) }
 
-// OnPhase implements kernel.PhaseAware. Entering Settling the producers start no
+// OnPhase implements kernel.PhaseAware. Entering Heal the producers start no
 // new batch (in-flight ones finish); the consumers keep reading. Entering
-// Settle (the drain) each consumer stops after a fetch that finds the end of
+// Drain each consumer stops after a fetch that finds the end of
 // every partition, so no read is outstanding at the end.
 func (w *Workload) OnPhase(p kernel.Phase) []core.Action {
 	for _, c := range w.loop.Clients {
 		switch p {
-		case kernel.PhaseRecovering:
+		case kernel.PhaseHeal:
 			c.p.noNew = true
-		case kernel.PhaseRecover:
+		case kernel.PhaseDrain:
 			c.c.drain = true
 		}
 	}

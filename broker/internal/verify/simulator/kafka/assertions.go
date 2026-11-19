@@ -25,9 +25,9 @@ var (
 	consumerFetchNeverOutOfRange            = assert.NewAlways("kafka: a consumer's fetch is never out of range")                                                   //determinismcheck:ok catalog handle, set once at start
 	definitelyRejectedBatchNeverCommitted   = assert.NewAlways("kafka: a definitely rejected batch is never committed")                                             //determinismcheck:ok catalog handle, set once at start
 	failedSegmentReportsNonNegative         = assert.NewAlways("kafka: a failed segment reports non-negative time and occupancy")                                   //determinismcheck:ok catalog handle, set once at start
-	fetchInSettlingSucceeds                 = assert.NewAlways("kafka: a fetch invoked in Settling succeeds")                                                       //determinismcheck:ok catalog handle, set once at start
+	fetchInHealSucceeds                     = assert.NewAlways("kafka: a fetch invoked in Heal succeeds")                                                           //determinismcheck:ok catalog handle, set once at start
 	fetchHighWatermarkNotAboveLog           = assert.NewAlways("kafka: a fetch never reports a high watermark above the committed log")                             //determinismcheck:ok catalog handle, set once at start
-	produceInSettlingIsAcked                = assert.NewAlwaysOnFailure("kafka: a produce still running in Settling is acked")                                      //determinismcheck:ok catalog handle, set once at start
+	produceInHealIsAcked                    = assert.NewAlwaysOnFailure("kafka: a produce still running in Heal is acked")                                          //determinismcheck:ok catalog handle, set once at start
 	recordCommittedWhereProduced            = assert.NewAlways("kafka: a record is committed where and as it was produced")                                         //determinismcheck:ok catalog handle, set once at start
 	sealedSegmentWithinBatchCap             = assert.NewAlways("kafka: a sealed segment holds at most MaxSegmentBatches batches")                                   //determinismcheck:ok catalog handle, set once at start
 	sealedSegmentOvershootsBytesByLastBatch = assert.NewAlways("kafka: a sealed segment overshoots MaxSegmentBytes by at most its last batch")                      //determinismcheck:ok catalog handle, set once at start
@@ -54,7 +54,7 @@ var (
 	segmentDurationsNonNegative             = assert.NewAlways("kafka: segment put, queue wait and commit durations are non-negative")                              //determinismcheck:ok catalog handle, set once at start
 	campaignCommittedAnyRecords             = assert.NewSometimes("kafka: the campaign committed records")                                                          //determinismcheck:ok catalog handle, set once at start
 	highWatermarkIsLogEnd                   = assert.NewAlways("kafka: the high watermark is the end of the committed log")                                         //determinismcheck:ok catalog handle, set once at start
-	kernelAnnouncedSettling                 = assert.NewAlways("kafka: the kernel announced Settling")                                                              //determinismcheck:ok catalog handle, set once at start
+	kernelAnnouncedHeal                     = assert.NewAlways("kafka: the kernel announced Heal")                                                                  //determinismcheck:ok catalog handle, set once at start
 	workloadIssuedFetches                   = assert.NewSometimes("kafka: workload issued fetches")                                                                 //determinismcheck:ok catalog handle, set once at start
 	workloadIssuedProduces                  = assert.NewSometimes("kafka: workload issued produces")                                                                //determinismcheck:ok catalog handle, set once at start
 )

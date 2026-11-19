@@ -77,7 +77,7 @@ func (s *sim) faultPhase() {
 func (s *sim) quietPhase() {
 	s.tracef("quiet tail begins")
 	s.quiet, s.faults = true, Faults{}
-	s.w.SetPhase(kernel.PhaseRecovering) // buggify Fault sites go quiet
+	s.w.SetPhase(kernel.PhaseHeal) // buggify Fault sites go quiet
 	for _, n := range s.nodes {
 		n.cut = false
 		n.resume()

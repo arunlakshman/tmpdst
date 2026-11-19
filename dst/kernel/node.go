@@ -384,7 +384,8 @@ func (h *nodeHost[In, Out]) boot() {
 		}
 		return
 	}
-	h.m, h.up, h.ok = m, true, false
+	h.m, h.up = m, true
+	h.invalidateHash()
 	if h.boots > 1 {
 		w.counters[countRestarts]++
 		w.kernelFact("sim_restarted", machine.Field{Key: "node", Value: machine.StringValue(h.name)})
@@ -448,7 +449,7 @@ func (h *nodeHost[In, Out]) pump() {
 func (h *nodeHost[In, Out]) stepOnce(in In) bool {
 	w := h.w
 	self := h.ref()
-	h.ok = false
+	h.invalidateHash()
 	var out []Out
 	now := machine.Now{Mono: h.local(), Wall: w.Wall()}
 	if !w.guard("Step "+string(h.name), func() { out = h.m.Step(now, in) }) {
@@ -510,6 +511,6 @@ func (h *nodeHost[In, Out]) phaseStep(p Phase) {
 	if !ok {
 		return
 	}
-	w.logMsg(fmt.Sprintf("on_phase %s %d", h.name, p), msg)
+	w.logMsg(fmt.Sprintf("on_phase %s %s", h.name, p), msg)
 	h.stepOnce(msg)
 }

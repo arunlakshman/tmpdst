@@ -29,9 +29,9 @@ func slowTail(fmin, fmax, smin, smax int64, p float64) kernel.FastWithRareSlow {
 	}
 }
 
-// Phases is Chaos 30s, Settling 10s, Settle 5s.
+// Phases is Faults 30s, Heal 10s, Drain 5s.
 func Phases() kernel.Phases {
-	return kernel.Phases{Chaos: 30 * machine.Second, Settling: 10 * machine.Second, Settle: 5 * machine.Second}
+	return kernel.Phases{Faults: 30 * machine.Second, Heal: 10 * machine.Second, Drain: 5 * machine.Second}
 }
 
 // New returns a Preset. PartialIOMax and MaxCommitItems stay zero.
@@ -77,7 +77,7 @@ func New() Preset {
 	}
 }
 
-// ProgressGraceTime is the Settling offset used by the liveness rules.
+// ProgressGraceTime is the Heal offset used by the liveness rules.
 const ProgressGraceTime = 6 * machine.Second
 
 // PhaseStart reports when the kernel announced phase p, from its sim_phase fact.

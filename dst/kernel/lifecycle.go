@@ -167,7 +167,7 @@ func (w *World) end(s nodeSlot, how machine.End, cause string) {
 	w.kernelFact(name, machine.Field{Key: "node", Value: machine.StringValue(b.name)},
 		machine.Field{Key: "cause", Value: machine.StringValue(cause)})
 	for _, sv := range w.services {
-		sv.base().ok = false
+		sv.base().invalidateHash()
 		if !w.guard("OnCrash "+sv.base().name, func() { sv.onCrash(who) }) {
 			w.halted = true
 		}

@@ -89,7 +89,7 @@ type Workload struct {
 	opts    Opts
 	history *History
 
-	stopped bool // PhaseSettle began: no new requests
+	stopped bool // PhaseDrain began: no new requests
 	loop    session.Loop[*client]
 }
 
@@ -133,21 +133,21 @@ func (w *Workload) onReady(c *client) []core.Action {
 	return []core.Action{c.Wake(machine.Millisecond)}
 }
 
-// OnPhase is called when the phase changes. Entering Settling every client drops its
+// OnPhase is called when the phase changes. Entering Heal every client drops its
 // connection at its next op boundary (idle ones now), so a connection damaged
-// in Chaos (black-holed, clogged) cannot starve it. Entering Settle (the drain)
+// in Faults (black-holed, clogged) cannot starve it. Entering Drain
 // clients issue nothing new; outstanding requests finish.
 func (w *Workload) OnPhase(p kernel.Phase) []core.Action {
 	var acts []core.Action
 	switch p {
-	case kernel.PhaseRecovering:
+	case kernel.PhaseHeal:
 		for _, c := range w.loop.Clients {
 			c.recycle = true
 			if c.State == clientReady { // idle: recycle now
 				acts = append(acts, w.next(c)...)
 			}
 		}
-	case kernel.PhaseRecover:
+	case kernel.PhaseDrain:
 		w.stopped = true
 	}
 	return acts

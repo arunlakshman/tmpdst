@@ -190,9 +190,9 @@ func (h *Harness) Crash(name string) { h.W.Crash(h.addrs[name], "test") }
 // Boot starts a new incarnation of a caller that is down.
 func (h *Harness) Boot(name string) { h.W.Boot(h.addrs[name]) }
 
-// Recover moves the world to PhaseRecovering. The kernel then calls EnterRecovery
+// Recover moves the world to PhaseHeal. The kernel then calls EnterRecovery
 // on every service: no new faults for requests issued after it.
-func (h *Harness) Recover() { h.W.SetPhase(kernel.PhaseRecovering) }
+func (h *Harness) Recover() { h.W.SetPhase(kernel.PhaseHeal) }
 
 // Faults lists the kinds of the faults that services injected, in order.
 func (h *Harness) Faults() []string {

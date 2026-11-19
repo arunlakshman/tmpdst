@@ -154,7 +154,7 @@ func TestAttritionGracefulStopExits(t *testing.T) {
 		s.Attrition = true
 		s.Restart = restartAfter(10*machine.Millisecond, 20*machine.Millisecond)
 	})
-	kernel.SchedulePhases(h.w, kernel.Phases{Chaos: machine.Second, Settling: machine.Second, Settle: 10 * machine.Second})
+	kernel.SchedulePhases(h.w, kernel.Phases{Faults: machine.Second, Heal: machine.Second, Drain: 10 * machine.Second})
 	res := h.run()
 	if !res.OK() || res.Exits == 0 || res.Crashes != 0 || stat(res, "deadline_kills") != 0 {
 		t.Fatalf("exits=%d crashes=%d %+v", res.Exits, res.Crashes, res.Failures)
@@ -174,7 +174,7 @@ func TestStopDeadlineKill(t *testing.T) {
 		s.Attrition = true
 		s.Restart = restartAfter(10*machine.Millisecond, 10*machine.Millisecond)
 	})
-	kernel.SchedulePhases(h.w, kernel.Phases{Chaos: machine.Second, Settling: machine.Second, Settle: 10 * machine.Second})
+	kernel.SchedulePhases(h.w, kernel.Phases{Faults: machine.Second, Heal: machine.Second, Drain: 10 * machine.Second})
 	res := h.run()
 	if !res.OK() || res.Exits != 0 || res.Crashes == 0 || stat(res, "deadline_kills") == 0 {
 		t.Fatalf("exits=%d crashes=%d %+v stats=%+v", res.Exits, res.Crashes, res.Failures, res.Stats)
@@ -331,7 +331,7 @@ func TestDriverOnPhase(t *testing.T) {
 				return note{string(make([]byte, p))}, true
 			}
 		})
-		kernel.SchedulePhases(h.w, kernel.Phases{Chaos: machine.Second, Settling: machine.Second, Settle: 10 * machine.Second})
+		kernel.SchedulePhases(h.w, kernel.Phases{Faults: machine.Second, Heal: machine.Second, Drain: 10 * machine.Second})
 		res := h.run()
 		return res, phases, h.w.Timeline().Snapshot("sim_phase"), h.w.Timeline().Snapshot("wl_phase")
 	}
@@ -339,13 +339,13 @@ func TestDriverOnPhase(t *testing.T) {
 	if !res.OK() {
 		t.Fatalf("%+v", res.Failures)
 	}
-	if len(phases) != 2 || phases[0] != kernel.PhaseRecovering || phases[1] != kernel.PhaseRecover {
+	if len(phases) != 2 || phases[0] != kernel.PhaseHeal || phases[1] != kernel.PhaseDrain {
 		t.Fatalf("OnPhase calls: %v", phases)
 	}
 	if len(sp) != 2 || sp[0].At != ms(1000) || sp[1].At != ms(2000) {
 		t.Fatalf("sim_phase facts: %+v", sp)
 	}
-	if v, _ := sp[0].Fact.Field("phase").(machine.Uint64Value); v != machine.Uint64Value(kernel.PhaseRecovering) {
+	if v, _ := sp[0].Fact.Field("phase").(machine.Uint64Value); v != machine.Uint64Value(kernel.PhaseHeal) {
 		t.Fatalf("phase field: %+v", sp[0].Fact)
 	}
 	if len(wp) != 2 || wp[0].At != sp[0].At {

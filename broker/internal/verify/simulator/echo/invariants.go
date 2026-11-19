@@ -122,10 +122,10 @@ func (*liveness) Name() string        { return "Liveness" }
 func (*liveness) Observe(kernel.View) {}
 
 func (l *liveness) AtEnd(v kernel.View) {
-	settling, ok1 := preset.PhaseStart(v, kernel.PhaseRecovering)
-	settle, ok2 := preset.PhaseStart(v, kernel.PhaseRecover)
-	v.Assert().Always(ok1 && ok2, kernelAnnouncedSettlingAndSettle)
-	from, to := settling+kernel.Time(preset.ProgressGraceTime), settle
+	heal, ok1 := preset.PhaseStart(v, kernel.PhaseHeal)
+	drain, ok2 := preset.PhaseStart(v, kernel.PhaseDrain)
+	v.Assert().Always(ok1 && ok2, kernelAnnouncedHealAndDrain)
+	from, to := heal+kernel.Time(preset.ProgressGraceTime), drain
 	for _, operation := range l.hist.Ops() {
 		v.Assert().Always(operation.Outcome != history.Pending, noRequestPendingAtEnd, assert.Pair{Key: "op", Value: operation.Op})
 		if !ok1 || !ok2 || operation.Invoke < from || operation.Invoke >= to {
@@ -139,7 +139,7 @@ func (l *liveness) AtEnd(v kernel.View) {
 		case GetOp:
 			good = strings.HasPrefix(res, "VAL ") || res == "ERR corrupt"
 		}
-		v.Assert().Always(good, requestInSettlingSucceeds,
+		v.Assert().Always(good, requestInHealSucceeds,
 			assert.Pair{Key: "op", Value: operation.Op}, assert.Pair{Key: "result", Value: res}, assert.Pair{Key: "invoke", Value: operation.Invoke})
 	}
 	v.Assert().Sometimes(len(l.hist.Ops()) > 0, workloadIssuedRequests)

@@ -16,7 +16,7 @@ type consumer struct {
 	pos       []int64
 	listed    bool
 	operation machine.ID // outstanding ReadOp, zero when none
-	drain     bool       // PhaseSettle began: stop once a fetch finds the end of every partition
+	drain     bool       // PhaseDrain began: stop once a fetch finds the end of every partition
 	done      bool
 }
 

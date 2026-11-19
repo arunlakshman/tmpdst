@@ -64,15 +64,15 @@ func TestPhaseStart(t *testing.T) {
 	tl := kernel.NewTimeline()
 	tl.Append(machine.NodeInstance{}, 10, machine.Fact{
 		Name:   "sim_phase",
-		Fields: []machine.Field{{Key: "phase", Value: machine.Uint64Value(uint64(kernel.PhaseRecovering))}},
+		Fields: []machine.Field{{Key: "phase", Value: machine.Uint64Value(uint64(kernel.PhaseHeal))}},
 	})
 	v := stubView{tl: tl, as: &stubAssert{}}
-	at, ok := PhaseStart(v, kernel.PhaseRecovering)
+	at, ok := PhaseStart(v, kernel.PhaseHeal)
 	if !ok || at != 10 {
-		t.Fatalf("PhaseStart Settling = %d, %v", at, ok)
+		t.Fatalf("PhaseStart Heal = %d, %v", at, ok)
 	}
-	if _, ok := PhaseStart(v, kernel.PhaseRecover); ok {
-		t.Fatal("PhaseStart Settle unexpectedly found")
+	if _, ok := PhaseStart(v, kernel.PhaseDrain); ok {
+		t.Fatal("PhaseStart Drain unexpectedly found")
 	}
 }
 

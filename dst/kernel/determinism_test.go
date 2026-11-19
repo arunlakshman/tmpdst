@@ -52,7 +52,7 @@ func chaosRun(seed uint64, log bool) kernel.Result {
 		v.Assert().Always(h.svc.applied > 0, serviceApplied)
 		v.Assert().Always(len(v.Timeline().Snapshot("put_done")) > 0, putsComplete)
 	}})
-	kernel.SchedulePhases(h.w, kernel.Phases{Chaos: machine.Second, Settling: machine.Second, Settle: 10 * machine.Second})
+	kernel.SchedulePhases(h.w, kernel.Phases{Faults: machine.Second, Heal: machine.Second, Drain: 10 * machine.Second})
 	return h.run()
 }
 
@@ -222,7 +222,7 @@ func TestBuggifyIsQuietOutsideTheFaultPhase(t *testing.T) {
 	if !w.Env().Fault(testSite, 1) {
 		t.Fatal("Fault(p=1) must fire in PhaseFaults")
 	}
-	w.SetPhase(kernel.PhaseRecovering)
+	w.SetPhase(kernel.PhaseHeal)
 	if w.Env().Fault(testSite, 1) {
 		t.Fatal("Fault must not fire outside PhaseFaults")
 	}

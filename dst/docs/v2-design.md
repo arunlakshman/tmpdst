@@ -826,28 +826,33 @@ The broker calls `kernel.SchedulePhases` (section 7.3), which sets the end time.
 
     type Phase uint8
 
+    // Numeric values are frozen for trace hash stability (0, 1, 2).
     const (
-        PhaseFaults     Phase = iota // faults on
-        PhaseRecovering              // faults off, nodes alive; liveness is checked
-        PhaseRecover                 // draining the rest
+        PhaseFaults Phase = 0 // faults on
+        PhaseHeal   Phase = 1 // faults off, nodes alive; liveness is checked
+        PhaseDrain  Phase = 2 // draining remaining in-flight messages
     )
 
     func (w *World) Phase() Phase
     // SetPhase appends the "sim_phase" fact, makes buggify Fault() quiet outside
-    // PhaseFaults, calls EnterRecovery on every service when PhaseRecovering
+    // PhaseFaults, calls EnterRecovery on every service when PhaseHeal
     // starts, then gives each live driver NodeSpec.OnPhase(p), in node order, as
     // one Step that takes no node time and skips the inbox.
     func (w *World) SetPhase(p Phase)
 
-    // Phases is the broker schedule: Chaos, then Settling, then Settle.
-    type Phases struct{ Chaos, Settling, Settle machine.Duration }
+    // Phases is the duration schedule: Faults, then Heal, then Drain.
+    type Phases struct {
+        Faults machine.Duration
+        Heal   machine.Duration
+        Drain  machine.Duration
+    }
 
     // SchedulePhases adds the two phase changes as host tasks on HostLane and
     // sets Config.End to the sum.
     func SchedulePhases(w *World, p Phases)
 
 The control plane "quiet tail" (`s.quiet`, `env.setQuiet(true)`) is
-`w.SetPhase(PhaseRecovering)`. The control plane has no drivers and its services
+`w.SetPhase(PhaseHeal)`. The control plane has no drivers and its services
 have no recovery mode, so only the quiet flag matters there.
 
 ### 7.4 Quiescent
@@ -1418,8 +1423,8 @@ in (or moves to) product code, not dst.
 | broker-simulator | OpResultUnknown | product: broker `history` package |
 | broker-simulator | Phase | `kernel.Phase` |
 | broker-simulator | PhaseFaults | `kernel.PhaseFaults` |
-| broker-simulator | PhaseRecover | `kernel.PhaseRecover` |
-| broker-simulator | PhaseRecovering | `kernel.PhaseRecovering` |
+| broker-simulator | PhaseDrain | `kernel.PhaseDrain` |
+| broker-simulator | PhaseHeal | `kernel.PhaseHeal` |
 | broker-simulator | Phases | `kernel.Phases` and `kernel.SchedulePhases`; field MaxQuietLatency to broker product presets (only product rules read it) |
 | broker-simulator | PlannedFault | deleted: test only; a test calls `w.At(t, HostLane, func() { w.Crash(n, "planned") })` |
 | broker-simulator | Process | `kernel.NodeSpec[In, Out]` and `kernel.Spawn` (Count: the host calls Spawn Count times; Factory and FactoryFor: `NodeSpec.New`, a closure over the typed per-seed params; NoAttrition and HiddenFromClients deleted, nothing sets them; Freezable deleted with freeze) |
@@ -2316,7 +2321,7 @@ T1.12d.
    - "broker: commit deadline exceeded" is `assert.NewReachableNotExpected` (it is declared in
      `internal/broker/assertions.go`: one word changed in a declaration, the machine is not
      changed);
-   - "kafka: a produce still running in Settling is acked" is `assert.NewAlwaysOnFailure`;
+   - "kafka: a produce still running in Heal is acked" is `assert.NewAlwaysOnFailure`;
    - "echo: an offset is acked with one payload" is `assert.NewAlwaysOnFailure`. T1.12b did not
      list this one, because it ran only kafka. It has 0 checks in the old tree too (300 echo seeds).
    They have 0 checks in 2000 kafka seeds and 300 echo seeds, in both trees. `ISSUES.md` item 7

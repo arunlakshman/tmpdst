@@ -231,7 +231,7 @@ func (t *testWorld) step() bool {
 	return t.w.Steps() > start
 }
 
-func (t *testWorld) recover() { t.w.SetPhase(kernel.PhaseRecovering) }
+func (t *testWorld) recover() { t.w.SetPhase(kernel.PhaseHeal) }
 
 // find returns the answer to request id (false if none came).
 func (t *testWorld) find(id machine.RequestID) (delivery, bool) {

@@ -13,9 +13,9 @@ func (*progressCheck) Name() string        { return "Liveness" }
 func (*progressCheck) Observe(kernel.View) {}
 
 func (p *progressCheck) AtEnd(v kernel.View) {
-	settling, ok := preset.PhaseStart(v, kernel.PhaseRecovering)
-	v.Assert().Always(ok, kernelAnnouncedSettling)
-	after := settling + kernel.Time(preset.ProgressGraceTime)
+	heal, ok := preset.PhaseStart(v, kernel.PhaseHeal)
+	v.Assert().Always(ok, kernelAnnouncedHeal)
+	after := heal + kernel.Time(preset.ProgressGraceTime)
 	var produced, reads int
 	for _, operation := range p.hist.Ops() {
 		v.Assert().Always(operation.Outcome != history.Pending, noOpPendingAtEnd, assert.Pair{Key: "op", Value: operation.Op})
@@ -26,7 +26,7 @@ func (p *progressCheck) AtEnd(v kernel.View) {
 		case ProduceRes:
 			produced++
 			if operation.Return >= after && r.Why != "rejected" {
-				v.Assert().Always(operation.Outcome == history.ResultKnown && r.Base >= 0, produceInSettlingIsAcked,
+				v.Assert().Always(operation.Outcome == history.ResultKnown && r.Base >= 0, produceInHealIsAcked,
 					assert.Pair{Key: "op", Value: operation.Op}, assert.Pair{Key: "result", Value: r}, assert.Pair{Key: "return", Value: operation.Return})
 			}
 		case ReadRes:
@@ -36,7 +36,7 @@ func (p *progressCheck) AtEnd(v kernel.View) {
 				for _, p := range r.Parts {
 					good = good && p.Code == 0
 				}
-				v.Assert().Always(good, fetchInSettlingSucceeds,
+				v.Assert().Always(good, fetchInHealSucceeds,
 					assert.Pair{Key: "op", Value: operation.Op}, assert.Pair{Key: "result", Value: r}, assert.Pair{Key: "invoke", Value: operation.Invoke})
 			}
 		}

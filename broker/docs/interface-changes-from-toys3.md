@@ -398,8 +398,8 @@ type Entry struct {
   engine landing during Chaos.
 - `Config.Scripted []ScriptedFault{At Time; Node core.NodeID; Kind EntryKind}`
   supports regression tests that need a crash at a specific step.
-- Rename `Phases.QuietTail` to `Settling`. Liveness rule: no `ErrUnavailable`
-  or timeout for ops *invoked* in Settling. Faults planned in Chaos may still
+- Rename `Phases.QuietTail` to `Settling` (later `Heal`). Liveness rule: no `ErrUnavailable`
+  or timeout for ops *invoked* in Settling/Heal. Faults planned in Chaos may still
   land there. Add `Phases.MaxQuietLatency`.
 
 ---

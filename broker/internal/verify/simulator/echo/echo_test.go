@@ -187,7 +187,7 @@ func (i *tallyRule) AtEnd(v kernel.View) {
 		if len(res) >= 3 && res[:3] == "ERR" {
 			i.t.errs++
 		}
-		if operation.Invoke >= kernel.Time(i.ph.Chaos+preset.ProgressGraceTime) {
+		if operation.Invoke >= kernel.Time(i.ph.Faults+preset.ProgressGraceTime) {
 			i.t.window++
 		}
 	}

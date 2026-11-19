@@ -303,7 +303,7 @@ Rules used for the right column:
 | `Outage` | `ServiceOutage` |
 | `ScriptedFault` | `PlannedFault` |
 | `PhaseAware` | `ReceivesPhaseChange` |
-| `PhaseChaos`, `PhaseSettle`, `PhaseSettling` | `PhaseFaults`, `PhaseRecover`, `PhaseRecovering` |
+| `PhaseChaos`, `PhaseSettle`, `PhaseSettling` | `PhaseFaults`, `PhaseDrain`, `PhaseHeal` |
 | `EntryQuiesce` | `EntryRecover` |
 | `Lane`, `laneKey`, `laneGroup`, `nodeLane` | `DeliveryLane`, `laneID`, `laneGroup` (keep), `nodeLane` (keep) |
 | `laneReserved`, `laneSim` | `laneForSystem`, `laneForSimulator` |

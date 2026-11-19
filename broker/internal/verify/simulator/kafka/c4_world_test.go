@@ -78,7 +78,7 @@ type world struct {
 
 func (w *world) Step() uint64               { return uint64(len(w.raw)) }
 func (w *world) Now() kernel.Time           { return w.now }
-func (w *world) Phase() kernel.Phase        { return kernel.PhaseRecovering }
+func (w *world) Phase() kernel.Phase        { return kernel.PhaseHeal }
 func (w *world) Timeline() *kernel.Timeline { return w.tl }
 func (w *world) Assert() machine.Assertions { return w.as }
 func (w *world) touch()                     { w.gen++ }

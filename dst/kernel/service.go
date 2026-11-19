@@ -95,7 +95,7 @@ func (h *serviceHost[Req, In]) onCrash(who machine.NodeInstance) { h.svc.OnCrash
 func (h *serviceHost[Req, In]) enterRecovery() { h.svc.EnterRecovery() }
 
 func (h *serviceHost[Req, In]) handle(from Ref[In], req Req) {
-	h.ok = false
+	h.invalidateHash()
 	if !h.w.guard("Handle "+h.name, func() { h.svc.Handle(h.cx, from, req) }) {
 		h.w.halted = true
 	}
@@ -132,7 +132,7 @@ func (c *ServiceContext[In]) Later(at Time, lane Lane, fn func(cx *ServiceContex
 	e.run = func() {
 		w.counters[countServiceSteps]++
 		w.logMsg("service "+c.b.name+" later", nil)
-		c.b.ok = false
+		c.b.invalidateHash()
 		if !w.guard("Later "+c.b.name, func() { fn(c) }) {
 			w.halted = true
 			return

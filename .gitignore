@@ -1,4 +1,6 @@
 .DS_Store
+.claude/
+.idea/
 /bin/
 /build/
 __pycache__/

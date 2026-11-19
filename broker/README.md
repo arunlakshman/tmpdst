@@ -27,6 +27,9 @@ make install-hooks   # uses ambient go / golangci-lint on PATH
 `make build` in this folder is the full gate, in order. From the repo root, `make build` runs it
 after the other modules and writes `bin/mdsbroker`. The control plane proto is in `controlplane/api`.
 
+Standalone (outside `go.work`): run root `make generate` first, then `make -C broker build`.
+Root `make check-modules-standalone` verifies `GOWORK=off go mod tidy` and `go build ./...`.
+
 | Step | What |
 |------|------|
 | fmt-check | `gofmt -l` must be empty |

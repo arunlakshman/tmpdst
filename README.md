@@ -24,12 +24,15 @@ A module may import only the modules to its left. `make check-deps` checks this 
 2. From the repo root:
 
         mise install      # go, golangci-lint, buf, java, minio; also installs the pre-commit hook
+        make generate     # required before a standalone broker/controlplane build (pb.go not in git)
         make build        # the full gate for all four modules, then the two binaries
 
 The root `Makefile` only calls the `Makefile` of each module, in the order above.
+`make build` (and `make all`) also runs `make check-modules-standalone`: each module must
+`go mod tidy` cleanly and `go build ./...` with `GOWORK=off`.
 
 Other root targets: `make generate`, `make test`, `make sim`, `make sim-campaign`,
-`make determinism`, `make install-hooks`, `make check-deps`.
+`make determinism`, `make install-hooks`, `make check-deps`, `make check-modules-standalone`.
 
 The commit hook (`ops/githooks/pre-commit`) runs `make build`.
 

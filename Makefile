@@ -7,14 +7,16 @@
 # The commit hook (ops/githooks/pre-commit) runs `make build`.
 # Bypass once: SKIP_BUILD_HOOK=1 git commit ...
 
-.PHONY: all build check-deps test-deps-guard generate test sim sim-campaign determinism install-hooks
+.PHONY: all build check-deps test-deps-guard check-modules-standalone generate test sim sim-campaign determinism install-hooks
 
 # Full verification: every root gate except install-hooks (one-time local setup).
 # Overlaps build on purpose so each named target is exercised.
-all: check-deps test-deps-guard generate build test sim sim-campaign determinism
+all: check-deps test-deps-guard generate check-modules-standalone build test sim sim-campaign determinism
 
 # The first step of build is the dependency order check (ops/scripts/check-module-deps.sh).
 # Its own test (test-deps-guard) runs right after it.
+# check-modules-standalone runs after the module builds so generated files exist
+# (controlplane build runs generate; the commit hook only runs make build).
 build:
 	$(MAKE) check-deps
 	$(MAKE) test-deps-guard
@@ -22,6 +24,7 @@ build:
 	$(MAKE) -C shared build
 	$(MAKE) -C controlplane build
 	$(MAKE) -C broker build
+	$(MAKE) check-modules-standalone
 	mkdir -p bin
 	cd controlplane && go build -o ../bin/mdscontrolplane ./cmd/mdscontrolplane
 	cd broker && go build -o ../bin/mdsbroker ./cmd/mdsbroker
@@ -32,6 +35,10 @@ check-deps:
 
 test-deps-guard:
 	bash ops/scripts/check-module-deps_test.sh
+
+# Each module must stay tidy and build with GOWORK=off (ops/scripts/check-modules-standalone.sh).
+check-modules-standalone:
+	bash ops/scripts/check-modules-standalone.sh
 
 # Only the control plane generates Go (the proto lives in controlplane/api). The broker imports it.
 generate:

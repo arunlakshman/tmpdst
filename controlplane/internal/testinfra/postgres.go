@@ -25,7 +25,7 @@ type PostgresInfo struct {
 
 // Postgres starts (once per package) a PostgreSQL container and returns a DSN
 // for a new empty schema. Pass the DSN to sqllog.OpenPostgres. The schema is
-// dropped when the test ends. It fails the test if Docker is not running.
+// dropped when the test ends. It fails the test if Podman is not running.
 func Postgres(t testing.TB) PostgresInfo {
 	t.Helper()
 	const user, pass, db = "postgres", "postgres", "postgres"

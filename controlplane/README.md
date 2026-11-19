@@ -26,7 +26,7 @@ Run: `go run ./cmd/mdscontrolplane`. From the repo root, `make build` also write
 - `make mutants` - plant each bug of `ops/mutants.txt` and require that a test fails.
 - `make fuzz` - fuzz the decoders (`FUZZTIME=10s` each).
 - `make spec-long` - the conformance tests with 2000 checks each. See `spec/README.md`.
-- `make it` - the end-to-end tests on the real binary, against DynamoDB Local, PostgreSQL and SeaweedFS (S3) in Podman. It needs Podman, fails without it, and never skips.
+- `make it` - the end-to-end tests on the real binary, against DynamoDB Local, PostgreSQL and SeaweedFS (S3) in Podman only (no Docker). It needs Podman on PATH, fails without it, and never skips. `internal/testinfra` points testcontainers at the Podman socket; no `docker` symlink or manual `TESTCONTAINERS_*` env is required.
 
 ## Layout
 

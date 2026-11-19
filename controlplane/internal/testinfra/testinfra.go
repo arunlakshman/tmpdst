@@ -1,7 +1,7 @@
 //go:build integration
 
 // Package testinfra starts the real services the integration tests need:
-// DynamoDB Local, PostgreSQL and SeaweedFS, in Docker, through testcontainers.
+// DynamoDB Local, PostgreSQL and SeaweedFS, in Podman, through testcontainers.
 //
 // Each service starts at most once per test package, the first time a test asks
 // for it. Every test then gets its own fresh table, schema or bucket, so tests
@@ -11,7 +11,7 @@
 //
 //	func TestMain(m *testing.M) { testinfra.Main(m) }
 //
-// If Docker is not running, the helpers fail the test. They never skip it.
+// If Podman is not running, the helpers fail the test. They never skip it.
 // Only code under the integration build tag imports this package, so
 // testcontainers never reaches the binary.
 package testinfra
@@ -48,12 +48,24 @@ var (
 	stamp   = time.Now().UnixNano() % 100000000
 )
 
-// start runs the container once and remembers its host:port.
+// start pulls the image (no start timer), then runs the container once and
+// remembers its host:port. The start budget covers only create/start/wait.
 func (s *service) start(req testcontainers.GenericContainerRequest, port string) (string, error) {
 	s.once.Do(func() {
+		if err := ensurePodman(); err != nil {
+			s.err = err
+			return
+		}
+		if err := pullImage(req.Image); err != nil {
+			s.err = fmt.Errorf("testinfra: cannot pull %s: %w", req.Image, err)
+			return
+		}
+
+		req.ProviderType = testcontainers.ProviderPodman
+		req.Started = true
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		req.Started = true
 		c, err := testcontainers.GenericContainer(ctx, req)
 		if c != nil {
 			mu.Lock()
@@ -61,7 +73,7 @@ func (s *service) start(req testcontainers.GenericContainerRequest, port string)
 			mu.Unlock()
 		}
 		if err != nil {
-			s.err = fmt.Errorf("testinfra: cannot start %s (is Docker running?): %w", req.Image, err)
+			s.err = fmt.Errorf("testinfra: cannot start %s (is Podman running?): %w", req.Image, err)
 			return
 		}
 		host, err := c.Host(ctx)
@@ -92,14 +104,18 @@ func unique(kind string) string {
 // Main runs the tests of the package and then stops the containers that the
 // tests started. Call it from TestMain. It exits the process.
 func Main(m *testing.M) {
+	if err := ensurePodman(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	code := m.Run()
 	Stop()
 	os.Exit(code)
 }
 
 // Stop terminates every container started so far. Main calls it; call it
-// yourself only if you do not use Main. The ryuk reaper of testcontainers
-// removes the containers anyway if the process dies before Stop.
+// yourself only if you do not use Main. Ryuk is disabled under Podman; Stop
+// is what removes the containers when the process exits cleanly.
 func Stop() {
 	mu.Lock()
 	cs := started

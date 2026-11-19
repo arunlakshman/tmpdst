@@ -26,7 +26,7 @@ type DynamoDBInfo struct {
 // DynamoDB returns a client for the shared DynamoDB Local container and a new
 // empty table (keys pk and sk, both strings: the same shape as
 // dynamolog.CreateTable makes). The table is deleted when the test ends.
-// The container is in memory only. It fails the test if Docker is not running.
+// The container is in memory only. It fails the test if Podman is not running.
 func DynamoDB(t testing.TB) DynamoDBInfo {
 	t.Helper()
 	addr, err := dynamoSvc.start(testcontainers.GenericContainerRequest{ContainerRequest: testcontainers.ContainerRequest{

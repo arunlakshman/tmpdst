@@ -38,7 +38,7 @@ type S3Info struct {
 // S3 starts (once per package) a SeaweedFS container (S3 gateway on) and
 // returns a new empty bucket. SeaweedFS runs without authentication, so the
 // dummy key of s3store.New is enough. Use PathStyle: true. The bucket is
-// deleted when the test ends. It fails the test if Docker is not running.
+// deleted when the test ends. It fails the test if Podman is not running.
 func S3(t testing.TB) S3Info {
 	t.Helper()
 	addr, err := seaweedSvc.start(testcontainers.GenericContainerRequest{ContainerRequest: testcontainers.ContainerRequest{

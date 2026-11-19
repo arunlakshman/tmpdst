@@ -1,12 +1,17 @@
 # Root build of the monorepo. It only calls the Makefile of each module, in this order:
 #   dst, shared, controlplane, broker  (a module may import only the modules before it).
 # `make build` is the full gate. It ends by building the two binaries into bin/.
+# `make all` runs every root verification target (not install-hooks).
 # Toolchain and commit hook: `mise install` (pins in mise.toml; postinstall runs make install-hooks).
 # Rules shared by the modules (fmt-check, vet, lint, modernize, ascii-check) are in make/common.mk.
 # The commit hook (ops/githooks/pre-commit) runs `make build`.
 # Bypass once: SKIP_BUILD_HOOK=1 git commit ...
 
-.PHONY: build check-deps test-deps-guard generate test sim sim-campaign determinism install-hooks
+.PHONY: all build check-deps test-deps-guard generate test sim sim-campaign determinism install-hooks
+
+# Full verification: every root gate except install-hooks (one-time local setup).
+# Overlaps build on purpose so each named target is exercised.
+all: check-deps test-deps-guard generate build test sim sim-campaign determinism
 
 # The first step of build is the dependency order check (ops/scripts/check-module-deps.sh).
 # Its own test (test-deps-guard) runs right after it.

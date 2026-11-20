@@ -1,10 +1,11 @@
 # Image for the control plane (cmd/mdscontrolplane).
 # Build from the root of the monorepo (the image needs the dst folder too):
-#   docker build -f deploy/container/mdscontrolplane.Containerfile -t mdscontrolplane:dev .
+#   podman build -f deploy/container/mdscontrolplane.Containerfile -t mdscontrolplane:dev .
 #
 # The *.pb.go and *_gen.go files are not in git, so this build makes them first
 # (buf generate, which also runs the plugin ops/tools/protoc-gen-mdswire with go run).
 # Versions match mise.toml (buf) and the Makefile (protoc plugins).
+# Root .dockerignore applies (module-local .dockerignore does not).
 
 FROM bufbuild/buf:1.47.2 AS buf
 

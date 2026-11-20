@@ -1,0 +1,19 @@
+# Used by root-context builds (deploy/container/*.Containerfile).
+# Module-local .dockerignore files do not apply when the build context is the repo root.
+
+.git
+.claude
+.idea
+.DS_Store
+
+bin
+**/build
+**/results
+**/.tools
+
+**/docs
+
+**/*.pb.go
+**/*_gen.go
+
+deploy/aws

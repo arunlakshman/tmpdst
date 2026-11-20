@@ -1,3 +1,4 @@
+# Unused for root-context builds (deploy/container/*.Containerfile). See the root .dockerignore.
 .git
 build
 results

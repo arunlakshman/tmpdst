@@ -7,7 +7,7 @@
 # The commit hook (ops/githooks/pre-commit) runs `make build`.
 # Bypass once: SKIP_BUILD_HOOK=1 git commit ...
 
-.PHONY: all build check-deps test-deps-guard check-modules-standalone generate test it sim sim-campaign determinism install-hooks
+.PHONY: all build check-deps test-deps-guard check-modules-standalone generate test it sim sim-campaign determinism install-hooks image-cp image-broker image-all
 
 # Full verification: every root gate except install-hooks (one-time local setup).
 # Overlaps build on purpose so each named target is exercised.
@@ -79,3 +79,13 @@ install-hooks:
 	@ln -sfn ../../ops/githooks/pre-commit .git/hooks/pre-commit
 	@chmod +x ops/githooks/pre-commit
 	@echo "installed .git/hooks/pre-commit -> ops/githooks/pre-commit"
+
+# Container images (Podman). Build context is the repo root; see deploy/container/README.md.
+image-cp:
+	podman build -f deploy/container/mdscontrolplane.Containerfile -t mdscontrolplane:dev .
+
+image-broker:
+	podman build -f deploy/container/mdsbroker.Containerfile -t mdsbroker:dev .
+
+image-all:
+	podman build -f deploy/container/mds-all.Containerfile -t mds-all:dev .

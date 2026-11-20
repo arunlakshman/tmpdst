@@ -48,6 +48,12 @@ The commit hook (`ops/githooks/pre-commit`) runs `make build` and therefore need
 - `bin/mdscontrolplane` - the control plane
 - `bin/mdsbroker` - the broker
 
+## Containers (quickstart)
+
+Demo (one container, in-memory stores): see the five-step quickstart in
+`deploy/container/README.md` (`make image-all`, then `podman run ... mds-all:dev`).
+Production uses separate `mdscontrolplane` and `mdsbroker` images from the same folder.
+
 ## Read more
 
 Each module has its own `README.md`.

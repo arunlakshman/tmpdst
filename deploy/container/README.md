@@ -1,5 +1,9 @@
 # Container images
 
+Human quickstart (clone → run `mds-all` → produce/consume): see
+[docs/getting-started.md](../../docs/getting-started.md). This file is the
+Containerfile / Makefile / kind+helm implementation detail.
+
 This folder holds Containerfiles for local and cluster runs. The repo standard is
 **Podman** (not Docker). Build every image from the **root of the monorepo** so
 `dst` / `shared` / `controlplane` / `broker` are on the context. The root

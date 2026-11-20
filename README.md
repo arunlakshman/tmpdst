@@ -1,65 +1,39 @@
-# mds
+# MDS
 
-MDS is a Kafka-protocol broker and a control plane, written in Go. It also has a library for
-deterministic simulation testing. All code is in this one repo.
+MDS is a Kafka-protocol message broker and control plane, written in Go. Clients speak Kafka wire protocol to `mdsbroker`; the broker talks to `mdscontrolplane` for metadata and classic consumer groups. The same repo includes `dst`, a library for deterministic simulation testing.
 
-## Modules
+## Quickstart
 
-The repo has four Go modules. Each module is a folder with its own `go.mod`.
+With [Podman](https://podman.io/) installed (on macOS: `podman machine start`), from the repo root:
 
-- `dst/` - the deterministic simulation library. It has no product words (no Kafka, no S3).
-- `shared/` - code that both products use and that has no product words (AWS metrics, HTTP settings, run info).
-- `controlplane/` - the control plane: metadata, topics, consumer groups, and the replicated log that stores them.
-- `broker/` - the Kafka-protocol broker. It talks to the control plane through its client.
+```sh
+make image-all
+podman run --rm --name mds-all \
+  -p 9092:9092 -p 8080:8080 -p 9100:9100 -p 9101:9101 \
+  mds-all:dev
+```
 
-## Dependency picture
+Point a Kafka client at `127.0.0.1:9092`. Full steps, smoke checks, and caveats (in-memory demo only): [docs/getting-started.md](docs/getting-started.md).
 
-    dst <- shared <- controlplane <- broker
+## What works in 0.1.0
 
-A module may import only the modules to its left. `make check-deps` checks this rule.
+Supported Kafka APIs, classic groups, and known gaps: [docs/what-works-in-0.1.0.md](docs/what-works-in-0.1.0.md).
 
-## Build
+## Modules and build
 
-1. Install [mise](https://mise.jdx.dev).
-2. From the repo root:
+Four Go modules (`dst` ← `shared` ← `controlplane` ← `broker`). A module may import only modules to its left; `make check-deps` enforces that.
 
-        mise install      # go, golangci-lint, buf, java, minio; also installs the pre-commit hook
-        make generate     # required before a standalone broker/controlplane build (pb.go not in git)
-        make build        # the full gate for all four modules, then the two binaries
+```sh
+mise install       # go, golangci-lint, buf, …; installs the pre-commit hook
+make generate      # required before standalone broker/controlplane builds
+make build         # full gate for all modules, then bin/mdscontrolplane and bin/mdsbroker
+```
 
-The root `Makefile` only calls the `Makefile` of each module, in the order above.
-`make build` (and `make all`) also runs `make check-modules-standalone`: each module must
-`go mod tidy` cleanly and `go build ./...` with `GOWORK=off`.
+`make build` also runs `make check-modules-standalone`. Module builds (and the commit hook) run Podman integration tests where applicable. See [CONTRIBUTING.md](CONTRIBUTING.md) for `SKIP_BUILD_HOOK` and contributor docs.
 
-Other root targets: `make generate`, `make test`, `make it`, `make sim`, `make sim-campaign`,
-`make determinism`, `make install-hooks`, `make check-deps`, `make check-modules-standalone`.
+## Links
 
-`make it` runs control-plane then broker Podman integration tests (scoped packages only, not
-ordinary unit tests). It needs Podman (DynamoDB Local, PostgreSQL and SeaweedFS via
-`shared/testinfra`). Module `make build` (and thus the commit hook) also runs those Podman
-ITs: controlplane and broker each depend on `it`.
-
-The commit hook (`ops/githooks/pre-commit`) runs `make build` and therefore needs Podman.
-
-## Binaries
-
-`make build` writes two binaries to `bin/`:
-
-- `bin/mdscontrolplane` - the control plane
-- `bin/mdsbroker` - the broker
-
-## Containers (quickstart)
-
-Demo (one container, in-memory stores): see the five-step quickstart in
-`deploy/container/README.md` (`make image-all`, then `podman run ... mds-all:dev`).
-Production uses separate `mdscontrolplane` and `mdsbroker` images from the same folder.
-
-## Read more
-
-Each module has its own `README.md`. Design and reference docs live under `docs/`
-(`docs/broker/`, `docs/controlplane/`, `docs/dst/`).
-
-## Follow-ups
-
-Post-0.1.0 work is tracked in Jira
-[MDS-11](https://manifester-e50593c9.atlassian.net/browse/MDS-11) (post GA 0.1.0 clean up).
+- [docs/](docs/) — getting started, what works, architecture, operations, contribute
+- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CHANGELOG.md](CHANGELOG.md)
+- [LICENSE](LICENSE) (Apache-2.0)

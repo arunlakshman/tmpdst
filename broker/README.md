@@ -40,7 +40,7 @@ Root `make check-modules-standalone` verifies `GOWORK=off go mod tidy` and `go b
 | test | unit packages (not the simulation tree `internal/verify/simulator`, not `test/integrationtest`) |
 | sim | `go test ./internal/verify/simulator/...`, then `go run ./cmd/mdssimulator -scenario kafka -seeds 300` |
 | it | `go test -tags integration ./test/integrationtest/` (Podman + Dynamo/S3 + real mdscontrolplane) |
-| risk | change risk score <= 20 (`docs/broker/risk-gate.md`) |
+| risk | change risk score <= 20 (`docs/contribute/risk-gate.md`) |
 
 Every `git commit` runs that gate via the pre-commit hook (with mise:
 `mise exec -- make build`). Podman must be running. Bypass once:
@@ -64,9 +64,9 @@ are checked by `go run github.com/manifesterio/mds/dst/cmd/determinismcheck` (se
 
 ## Docs
 
-Root `docs/broker/`:
+Start at [`docs/README.md`](../docs/README.md). Read more:
 
-- `docs/broker/decisions.md` - design decisions
-- `docs/broker/risk-gate.md` - change risk score threshold and baseline
-- `docs/broker/consumer-groups-design.md` - consumer groups design
-- `docs/broker/observability.md` - observability reference
+- [`docs/what-works-in-0.1.0.md`](../docs/what-works-in-0.1.0.md) - supported Kafka APIs and gaps
+- [`docs/operations/observability.md`](../docs/operations/observability.md) - metrics, logs, `run_id`
+- [`docs/contribute/risk-gate.md`](../docs/contribute/risk-gate.md) - change risk score threshold and baseline
+- [`docs/engineering/decisions.md`](../docs/engineering/decisions.md) - still-true ADR index (full log in [`archive/broker/decisions.md`](../docs/engineering/archive/broker/decisions.md))

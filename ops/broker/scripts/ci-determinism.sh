@@ -2,7 +2,7 @@
 # CI gate for the deterministic packages (internal/core, internal/verify/simulator (the tree on dst/kernel), internal/wire/segmentformat, the broker spec in
 # spec, internal/verify/speccheck (the spec bridge) except its system adapters in internal/verify/speccheck/specsystem,
 # plus internal/wire/kafkawire and internal/broker).
-# Control-plane replica lives in the controlplane module; see docs/broker/decisions.md (I, 55, 56).
+# Control-plane replica lives in the controlplane module; see docs/engineering/decisions.md (I; archive log for 55, 56).
 #   1. determinismcheck: exact-path import allow-list plus banned constructs.
 #   2. Every third-party module they depend on has a reviewed audit record
 #      for the exact version in go.mod (so a version bump forces a re-audit).

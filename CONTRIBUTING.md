@@ -1,43 +1,36 @@
-# Contributing
+# Contributing to MDS
 
-Thank you for helping. This file explains how the repo is laid out and where tests go.
+## Prerequisites
 
-## Repo layout
+- [mise](https://mise.jdx.dev) (toolchain: Go, golangci-lint, buf, and related tools)
+- [Podman](https://podman.io/) for the full commit hook and integration tests (`make it`, module `make build` on controlplane/broker)
 
-| Folder | What it is |
-|---|---|
-| `dst/` | Deterministic simulation testing library |
-| `shared/` | Small code used by more than one module |
-| `broker/` | The broker |
-| `controlplane/` | The control plane |
-| `deploy/` | Helm charts (`helm/`) and container build files (`container/`) |
-| `docs/` | Design docs, one folder per module |
-| `ops/` | Repo tooling: scripts, git hooks, shared Makefile rules (`ops/make/common.mk`) |
+## Build
 
-Each module has its own `go.mod`. Run `make` commands inside the module, or the root `Makefile` for all modules.
+From the repo root:
 
-## Where tests go
+```sh
+mise install       # toolchain + pre-commit hook
+make generate      # required before standalone broker/controlplane builds (pb.go not in git)
+make build         # full gate: all modules, then bin/mdscontrolplane and bin/mdsbroker
+```
 
-Use the same rule in every module.
+The commit hook runs `make build` and therefore needs Podman. To skip the hook for a one-off commit (for example docs-only):
 
-1. **Unit tests** sit next to the code, as `*_test.go` in the same folder.
-2. **Slow tests, simulation tests, and tests across many packages** go in `<module>/test/`.
-   Example: `broker/test/integrationtest`, `controlplane/test/conformance`.
-3. **Test data files** go in a `testdata/` folder beside the test that reads them.
-   Go tools skip `testdata/` folders, so never put Go packages there.
-4. **Test helper packages** (code other tests import) are normal packages, not `testdata/`.
-   Example: `dst/assert`, `dst/golden`, `dst/live`.
-5. **Examples** go in `examples/`. They must compile in CI.
-6. **Architecture tests** stay in the package they guard.
-   Example: `controlplane/internal/controlplane/architecture_test.go`.
+```sh
+SKIP_BUILD_HOOK=1 git commit ...
+```
 
-## Before you send a pull request
+## Docs for contributors
 
-- Run `make` at the root. It runs the checks, the tests, the simulations, and the determinism check.
-- Run `make install-hooks` once to enable the pre-commit hook.
-- Keep names, comments, and docs in plain, simple English.
-- Every new file needs the Apache-2.0 license, which covers the whole repo (see `LICENSE`).
+| Topic | Doc |
+|-------|-----|
+| Build, hooks, standalone modules | [docs/contribute/build.md](docs/contribute/build.md) |
+| Determinism, allow-list, audits | [docs/contribute/determinism.md](docs/contribute/determinism.md) |
+| Risk-score gate | [docs/contribute/risk-gate.md](docs/contribute/risk-gate.md) |
 
-## Reporting a security problem
+## Pull requests
 
-Do not open a public issue. Read `SECURITY.md`.
+- Keep source and comments ASCII unless a file already uses non-ASCII for a reason.
+- Format and tests for code you touch (`make build` / module gates).
+- Do not commit secrets, credentials, or local env files.

@@ -22,7 +22,7 @@ Run: `go run ./cmd/mdscontrolplane`. From the repo root, `make build` also write
 - `make build` - the full gate (above). It needs no Podman.
 - `make generate` - the generated files from the `.proto` files.
 - `make test-race` - the tests under the race detector (`RACE_RUNS=3` repeats them).
-- `make sim-campaign` - the simulation campaign, 300 seeds of each scenario (`SIM_SEEDS=5000` for more). See `docs/controlplane/simulation.md`.
+- `make sim-campaign` - the simulation campaign, 300 seeds of each scenario (`SIM_SEEDS=5000` for more). See [`docs/contribute/determinism.md`](../docs/contribute/determinism.md) and the archive note [`docs/engineering/archive/controlplane/simulation.md`](../docs/engineering/archive/controlplane/simulation.md).
 - `make mutants` - plant each bug of `../ops/controlplane/mutants.txt` and require that a test fails.
 - `make fuzz` - fuzz the decoders (`FUZZTIME=10s` each).
 - `make spec-long` - the conformance tests with 2000 checks each. See `spec/README.md`.
@@ -30,7 +30,14 @@ Run: `go run ./cmd/mdscontrolplane`. From the repo root, `make build` also write
 
 ## Layout
 
-See `internal/controlplane/doc.go` for the package map and the mental model, and `docs/controlplane/glossary.md` for the terms. `docs/controlplane/rebalance.md` is the group protocol design; `docs/controlplane/kafka-differences.md` lists where it differs from Apache Kafka.
+See `internal/controlplane/doc.go` for the package map and the mental model, and
+[docs/reference/glossary.md](../docs/reference/glossary.md) for the terms.
+[docs/kafka-compatibility.md](../docs/kafka-compatibility.md) lists where classic
+groups differ from Apache Kafka. The rebalance machine design is in
+[docs/engineering/archive/controlplane/rebalance.md](../docs/engineering/archive/controlplane/rebalance.md).
+Simulation details:
+[docs/contribute/determinism.md](../docs/contribute/determinism.md) and
+[docs/engineering/archive/controlplane/simulation.md](../docs/engineering/archive/controlplane/simulation.md).
 
 - `cmd/mdscontrolplane` - the binary
 - `cmd/cpsim` - the simulation campaign runner

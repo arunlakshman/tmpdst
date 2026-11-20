@@ -9,7 +9,8 @@ Module: `github.com/manifesterio/mds/dst`
 
 This module is a folder of the MDS monorepo. It imports no other module of the repo.
 
-A short guide with one example for each part is in [docs/dst/v2.md](../docs/dst/v2.md).
+A short guide is in [docs/reference/dst.md](../docs/reference/dst.md).
+Contributor determinism policy: [docs/contribute/determinism.md](../docs/contribute/determinism.md).
 
 ## Build
 
@@ -65,9 +66,9 @@ outside `../ops/dst/determinism-allow.txt`. `../ops/dst/scripts/ci-determinism.s
 
 ## Docs
 
-- [docs/dst/v2.md](../docs/dst/v2.md) - a short guide with one small example for each part
-- [docs/dst/lessons.md](../docs/dst/lessons.md) - one RNG, virtual time, issue-time faults, phases, record-and-continue, Go sans-I/O
-- [docs/dst/paper.md](../docs/dst/paper.md) - SOSP'21 ShardStore ideas mapped onto dst
+- [docs/reference/dst.md](../docs/reference/dst.md) - short public guide
+- [docs/contribute/determinism.md](../docs/contribute/determinism.md) - determinism rules for contributors
+- [docs/engineering/archive/dst/](../docs/engineering/archive/dst/) - lessons, paper, longer v2 notes
 
 ## How to run campaigns
 

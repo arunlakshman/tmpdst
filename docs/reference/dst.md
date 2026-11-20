@@ -66,5 +66,7 @@ MDS_CAMPAIGN=30s go run ./examples/kvsim
 ## Longer guide
 
 Cut-down walkthroughs of machines, routing, services, lanes, phases, and
-Lockstep are in the historical page `docs/dst/v2.md`. Prefer the compiling
-examples under `dst/examples/` over those snippets.
+Lockstep are in the historical page
+[`docs/engineering/archive/dst/v2.md`](../engineering/archive/dst/v2.md)
+(stub: [`docs/dst/v2.md`](../dst/v2.md)). Prefer the compiling examples under
+`dst/examples/` over those snippets.

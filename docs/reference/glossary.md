@@ -54,7 +54,7 @@ One line per term. Plain words. For the layout of the control-plane code see
 
 - **machine.Machine**: the dst interface of a thing that does no IO: `Step(now, in)` returns outputs. The replica and the rebalance machine have this shape.
 - **dst**: the deterministic simulation testing library (module `github.com/manifesterio/mds/dst`). It has the scheduler, the random stream, fault injection and the runner. See [dst.md](dst.md).
-- **simulator**: `internal/verify/simulator`: runs replicas and consumers on a virtual clock with a fake log and fake objects, one seed per run. `cmd/cpsim` runs campaigns of it. See [docs/controlplane/simulation.md](../controlplane/simulation.md).
+- **simulator**: `internal/verify/simulator`: runs replicas and consumers on a virtual clock with a fake log and fake objects, one seed per run. `cmd/cpsim` runs campaigns of it. See [docs/engineering/archive/controlplane/simulation.md](../engineering/archive/controlplane/simulation.md).
 - **seed**: the one number that decides a whole run. Same seed, same run.
 - **scenario**: a named fault set for the simulator (basic, log-faults, crash-restart, leader-fencing, chaos).
 - **oracle**: the checks of the simulator on a finished run. They compare answers with the model and check the other properties.

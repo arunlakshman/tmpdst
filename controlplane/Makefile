@@ -10,7 +10,8 @@ PROTOC_GEN_GO   ?= protoc-gen-go
 PROTOC_GEN_GRPC ?= protoc-gen-go-grpc
 PROTO_GO_VER    ?= v1.35.2
 PROTO_GRPC_VER  ?= v1.5.1
-# Seeds per scenario for make sim-campaign (see docs/controlplane/simulation.md).
+# Seeds per scenario for make sim-campaign (see docs/contribute/determinism.md;
+# archive: docs/engineering/archive/controlplane/simulation.md).
 SIM_SEEDS       ?= 300
 
 .PHONY: it build compile test proto proto-tools fmt-check vet lint modernize-check modernize \

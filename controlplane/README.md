@@ -31,8 +31,8 @@ Run: `go run ./cmd/mdscontrolplane`. From the repo root, `make build` also write
 ## Layout
 
 See `internal/controlplane/doc.go` for the package map and the mental model, and
-[docs/reference/glossary.md](../docs/reference/glossary.md) for the terms.
-[docs/kafka-compatibility.md](../docs/kafka-compatibility.md) lists where classic
+[docs/architecture.md](../docs/architecture.md) for the terms.
+[docs/what-works-in-0.1.0.md](../docs/what-works-in-0.1.0.md) lists where classic
 groups differ from Apache Kafka. Simulation: [docs/contribute/determinism.md](../docs/contribute/determinism.md).
 
 - `cmd/mdscontrolplane` - the binary

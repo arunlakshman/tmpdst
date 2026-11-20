@@ -25,9 +25,8 @@ SKIP_BUILD_HOOK=1 git commit ...
 
 | Topic | Doc |
 |-------|-----|
-| Build, hooks, standalone modules | [docs/contribute/build.md](docs/contribute/build.md) |
-| Determinism, allow-list, audits | [docs/contribute/determinism.md](docs/contribute/determinism.md) |
-| Risk-score gate | [docs/contribute/risk-gate.md](docs/contribute/risk-gate.md) |
+| Build, hooks, risk gate | [docs/contribute/build.md](docs/contribute/build.md) |
+| Determinism, dst, audits | [docs/contribute/determinism.md](docs/contribute/determinism.md) |
 
 ## Pull requests
 

@@ -10,7 +10,7 @@ import (
 	"github.com/manifesterio/mds/dst/machine"
 )
 
-// The host of the rebalance machine (docs/kafka-compatibility.md section 11). In
+// The host of the rebalance machine (docs/what-works-in-0.1.0.md section 11). In
 // production server.Node runs the machine in a second loop beside the replica.
 // Here each node gets a second kernel node ("rb-0" beside "cp-0") that crashes
 // and restarts with the replica; a restart takes a new machine, so it starts
@@ -216,7 +216,7 @@ func (h *groupHost) afterStep() {
 
 // route handles one output of the machine. It is a copy of routeGroups of the
 // server (controlplane/internal/controlplane/server). It also checks two
-// promises of the machine to its host (docs/kafka-compatibility.md sections 3 and 9): a
+// promises of the machine to its host (docs/what-works-in-0.1.0.md sections 3 and 9): a
 // request id is never used twice in one run of the process (Node.reply depends
 // on it), and no call is answered OK while the machine was last told that it
 // does not have the role. Every case of rebalance.Output is listed, so a new

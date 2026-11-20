@@ -64,11 +64,10 @@ Turn off idempotent produce if your client defaults it on
 
 - In-memory log store and in-memory object store
 - One process pair suitable for a demo, not a durable deploy
-- For real stores and separate images, see [operations](operations/run.md) and
-  [deploy](operations/deploy.md)
+- For real stores and separate images, see [operations.md](operations.md)
 
 ## Next
 
-- [What works in 0.1.0](what-works-in-0.1.0.md)  -  which Kafka APIs are served
-- [Kafka compatibility](kafka-compatibility.md)  -  classic-group diffs vs Apache Kafka
-- [Architecture](architecture.md)  -  how the pieces connect
+- [What works in 0.1.0](what-works-in-0.1.0.md) - APIs, groups, Kafka diffs
+- [Architecture](architecture.md) - how the pieces connect
+- [Operations](operations.md) - flags, metrics, containers

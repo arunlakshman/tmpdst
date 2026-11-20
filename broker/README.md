@@ -40,7 +40,7 @@ Root `make check-modules-standalone` verifies `GOWORK=off go mod tidy` and `go b
 | test | unit packages (not the simulation tree `internal/verify/simulator`, not `test/integrationtest`) |
 | sim | `go test ./internal/verify/simulator/...`, then `go run ./cmd/mdssimulator -scenario kafka -seeds 300` |
 | it | `go test -tags integration ./test/integrationtest/` (Podman + Dynamo/S3 + real mdscontrolplane) |
-| risk | change risk score <= 20 (`docs/contribute/risk-gate.md`) |
+| risk | change risk score <= 20 (`docs/contribute/build.md`) |
 
 Every `git commit` runs that gate via the pre-commit hook (with mise:
 `mise exec -- make build`). Podman must be running. Bypass once:
@@ -67,5 +67,5 @@ are checked by `go run github.com/manifesterio/mds/dst/cmd/determinismcheck` (se
 Start at [`docs/README.md`](../docs/README.md). Read more:
 
 - [`docs/what-works-in-0.1.0.md`](../docs/what-works-in-0.1.0.md) - supported Kafka APIs and gaps
-- [`docs/operations/observability.md`](../docs/operations/observability.md) - metrics, logs, `run_id`
-- [`docs/contribute/risk-gate.md`](../docs/contribute/risk-gate.md) - change risk score threshold and baseline
+- [`docs/operations.md`](../docs/operations.md) - run, metrics, deploy
+- [`docs/contribute/build.md`](../docs/contribute/build.md) - build gate and risk score

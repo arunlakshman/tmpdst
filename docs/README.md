@@ -1,32 +1,19 @@
 # MDS documentation
 
-Docs for the open-source `v0.1.0` launch. Start with getting started if you want
-to run something. Use what-works and kafka-compatibility before you assume a
-Kafka feature is present.
+Open-source `v0.1.0` docs. Few pages on purpose.
 
-## Users
+## Use
 
-- [Getting started](getting-started.md)  -  Podman + `mds-all` quickstart
-- [What works in 0.1.0](what-works-in-0.1.0.md)  -  supported Kafka APIs and gaps
-- [Architecture](architecture.md)  -  broker, control plane, stores, modules
-- [Kafka compatibility](kafka-compatibility.md)  -  API ranges and intentional diffs
-
-## Ops
-
-- [Run](operations/run.md)  -  binaries, flags, stores, objects
-- [Observability](operations/observability.md)  -  metrics, logs, `run_id`
-- [Deploy](operations/deploy.md)  -  separate images; kind + helm pointer
+- [Getting started](getting-started.md) - Podman + `mds-all`
+- [What works in 0.1.0](what-works-in-0.1.0.md) - APIs, groups, gaps, Kafka diffs
+- [Architecture](architecture.md) - runtime picture, modules, terms
+- [Operations](operations.md) - run, metrics, containers
 
 ## Contribute
 
-- [Build](contribute/build.md)  -  mise, `make build`, Podman, hooks
-- [Determinism](contribute/determinism.md)  -  why, allow-list, audits, sim
-- [Risk gate](contribute/risk-gate.md)  -  change-risk threshold
+- [Build](contribute/build.md) - mise, gates, risk score
+- [Determinism](contribute/determinism.md) - dst, allow-list, audits, campaigns
 
-## Reference
-
-- [Glossary](reference/glossary.md)
-- [DST](reference/dst.md)  -  deterministic simulation library
-
-Determinism CI still reads audit records under `docs/broker/dep-audits/` and
-`docs/controlplane/dep-audits/`. Do not move those paths.
+Determinism CI reads audit records under `docs/broker/dep-audits/` and
+`docs/controlplane/dep-audits/`. Do not move those paths without updating the
+scripts.

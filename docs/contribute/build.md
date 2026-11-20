@@ -1,48 +1,33 @@
 # Build
 
-How to build and gate the monorepo. Module folders (`dst/`, `shared/`,
-`controlplane/`, `broker/`) each have a `go.mod` and a `Makefile`. Root
-`make build` drives them in dependency order, then writes the binaries.
+How to build and gate the monorepo. Modules (`dst/`, `shared/`, `controlplane/`,
+`broker/`) each have a `go.mod` and `Makefile`. Root `make build` drives them in
+order, then writes `bin/mdscontrolplane` and `bin/mdsbroker`.
 
 ## Prerequisites
 
-1. Install [mise](https://mise.jdx.dev).
-2. From the repo root:
-
 ```sh
-mise install      # go, golangci-lint, buf, java, minio; installs the pre-commit hook
-make generate     # required before a standalone broker/controlplane build (pb.go not in git)
-make build        # full gate for all modules, then bin/mdscontrolplane and bin/mdsbroker
+mise install      # toolchain + pre-commit hook
+make generate     # pb.go / gen files are not in git
+make build        # full gate, then binaries
 ```
 
-Without mise: put Go and golangci-lint on PATH, then `make install-hooks` and
+Without mise: Go and golangci-lint on PATH, then `make install-hooks` and
 `make build`.
 
 ## What `make build` covers
 
-Root `Makefile` calls each module's gate (`dst` -> `shared` -> `controlplane` ->
-`broker`), then `make check-modules-standalone`, then the two binaries under
-`bin/`.
+`dst` -> `shared` -> `controlplane` -> `broker`, then
+`make check-modules-standalone`, then binaries. Module steps: fmt, ASCII, vet,
+lint, compile, unit tests, then sim / IT / risk / determinism as wired.
 
-Typical module steps: fmt, ASCII check, vet, lint, compile, unit tests, then
-module-specific sim / IT / risk / determinism. See each module `README.md`.
+Other roots: `make test`, `make it`, `make sim`, `make sim-campaign`,
+`make determinism`, `make check-deps`.
 
-Other root targets: `make test`, `make it`, `make sim`, `make sim-campaign`,
-`make determinism`, `make check-deps`, `make check-modules-standalone`.
+## Podman and the hook
 
-## Podman
-
-Broker and control-plane integration tests use Podman (DynamoDB Local,
-PostgreSQL, SeaweedFS via `shared/testinfra`). Root `make it` runs those
-scoped IT packages. Module `make build` (and thus the commit hook) also runs
-them where the module depends on `it`.
-
-On macOS: `podman machine start` before committing or running `make it`.
-
-## Pre-commit hook
-
-`mise install` links `ops/githooks/pre-commit`, which runs `make build` (via
-`mise exec` when mise is present). Bypass one commit when you must:
+Broker/controlplane ITs need Podman (`shared/testinfra`). On macOS:
+`podman machine start`. The pre-commit hook runs `make build`. Bypass once:
 
 ```sh
 SKIP_BUILD_HOOK=1 git commit ...
@@ -50,20 +35,32 @@ SKIP_BUILD_HOOK=1 git commit ...
 
 ## Standalone modules (`GOWORK=off`)
 
-Each module must tidy and build outside `go.work`:
-
 ```sh
 make check-modules-standalone
-# equivalent idea per module:
-#   GOWORK=off go mod tidy && GOWORK=off go build ./...
 ```
 
-For a standalone broker or controlplane build: run root `make generate` first
-(generated files are not in git), then `make -C broker build` or
-`make -C controlplane build`.
+Standalone broker/CP: root `make generate`, then `make -C broker build` (or
+controlplane).
 
-## Related
+## Risk gate (broker)
 
-- [determinism.md](determinism.md) — import allow-list and audit records
-- [risk-gate.md](risk-gate.md) — change-risk score at end of broker `make build`
-- Module READMEs: `dst/README.md`, `controlplane/README.md`, `broker/README.md`
+Broker `make build` ends with `ops/tools/riskscore` (stdlib only). It fails when
+a function is too hard to change safely.
+
+```
+risk(m) = comp(m)^2 * (1 - cov(m))^3 + comp(m)        cov in 0..1
+```
+
+Default threshold **20**. Override: `make build RISK_THRESHOLD=15`.
+
+```sh
+make risk           # gate on merged coverprofiles
+make risk-strict    # ignore baseline; fail on all offenders
+make risk-baseline  # rewrite ops/broker/risk-baseline.json (review the diff)
+```
+
+Baseline ratchet: `ops/broker/risk-baseline.json`. Fails on new offenders over
+threshold, or baselined scores that got worse past tolerance (default 0.5).
+Improvements never fail. Commit baseline diffs deliberately.
+
+Determinism gate is separate: [determinism.md](determinism.md).

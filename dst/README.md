@@ -9,8 +9,7 @@ Module: `github.com/manifesterio/mds/dst`
 
 This module is a folder of the MDS monorepo. It imports no other module of the repo.
 
-A short guide is in [docs/reference/dst.md](../docs/reference/dst.md).
-Contributor determinism policy: [docs/contribute/determinism.md](../docs/contribute/determinism.md).
+Docs: [docs/contribute/determinism.md](../docs/contribute/determinism.md).
 
 ## Build
 
@@ -66,8 +65,7 @@ outside `../ops/dst/determinism-allow.txt`. `../ops/dst/scripts/ci-determinism.s
 
 ## Docs
 
-- [docs/reference/dst.md](../docs/reference/dst.md) - short public guide
-- [docs/contribute/determinism.md](../docs/contribute/determinism.md) - determinism rules for contributors
+- [docs/contribute/determinism.md](../docs/contribute/determinism.md) - dst overview, allow-list, campaigns
 
 ## How to run campaigns
 

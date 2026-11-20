@@ -8,7 +8,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
 )
 
-// Tests of the rules that are new or changed (docs/kafka-compatibility.md sections 5 and 6).
+// Tests of the rules that are new or changed (docs/what-works-in-0.1.0.md sections 5 and 6).
 
 // Rule 30: an existing member with a parked join is not removed when its
 // session timer fires. A member with no parked call is.

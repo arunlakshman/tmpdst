@@ -53,7 +53,25 @@ Classic protocol only. **KIP-848 is not advertised.** A client with
 - `MEMBER_ID_REQUIRED` is not used: a new member gets a generated id and joins
   at once.
 
-More intentional diffs vs Apache Kafka: [kafka-compatibility.md](kafka-compatibility.md).
+### Intentional diffs vs Apache Kafka (classic)
+
+| Topic | Apache Kafka (classic) | MDS 0.1.0 |
+|---|---|---|
+| Unchanged follower rejoin in Stable / CompletingRebalance | Often answered at once with the current generation; leader rejoin in Stable starts a round | Any JoinGroup on Stable or CompletingRebalance opens a new rebalance immediately |
+| Empty round | Generation still advances when the group becomes Empty | Generation kept; group goes Empty |
+| Protocol choice | Members vote among protocols everyone supports | First protocol in the leader's list that every member has |
+| Protocol mismatch on join | Refused immediately with `INCONSISTENT_GROUP_PROTOCOL` | Protocol type checked at once; joiner with no common protocol is parked, then the round ends with that error |
+| SyncGroup assignment | Missing members get an empty assignment | Leader sync validated: unknown or duplicate assignment is an error |
+| Manual / simple groups | Generation < 0 on Empty can create a "simple group" | Manual OffsetCommit does not create a group; Describe says Dead; List omits it |
+| Describe outside Stable | Often omits protocol / member metadata | Describe returns logged protocol, metadata, and assignment with current memory state name |
+| `MEMBER_ID_REQUIRED` (KIP-394) | Empty member id (v4+) gets a required-id challenge | Empty id creates the member and joins in one step |
+| Static membership (`group.instance.id`) | Supported on classic paths | Instance id stored, not used; dynamic members only |
+
+## Compression
+
+Record batches are stored and fetched as **opaque bytes**. The broker accepts
+gzip, snappy, lz4, and zstd and never decompresses. CRC and length checks use
+the batch header; clients decompress on read.
 
 ## CreateTopics quirks
 
@@ -83,8 +101,8 @@ A request whose key or version is outside the table gets **no error payload**:
 the broker closes the connection. Only an out-of-range ApiVersions request still
 gets a response (`UNSUPPORTED_VERSION`).
 
-Not in the table (and therefore not served): InitProducerId, transactions,
-KIP-848 group APIs, and every other Kafka API key.
+Not in the table: InitProducerId, transactions, KIP-848 group APIs, and every
+other Kafka API key.
 
 ## Checking it
 
@@ -94,6 +112,6 @@ produce, consume with a group, commit offsets, rebalance, and
 
 ## After 0.1.0
 
-Post-release clean-up and follow-ups are tracked in
-[MDS-11](https://manifester-e50593c9.atlassian.net/browse/MDS-11). That ticket is
-not required to use the OSS build.
+Post-release clean-up:
+[MDS-11](https://manifester-e50593c9.atlassian.net/browse/MDS-11). Not required
+to use the OSS build.

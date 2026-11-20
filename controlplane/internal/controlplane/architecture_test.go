@@ -26,7 +26,7 @@ const (
 	// contract and spec are public: the broker imports them. They are in the module root, not under internal/.
 	contractPkg = "contract"
 	spec        = "spec"
-	infra       = "internal/testinfra"
+	infra       = shared + "/testinfra"
 )
 
 type pkg struct {
@@ -88,7 +88,7 @@ var domainEdges = map[string][]string{}
 // The verification side is test infrastructure, so it may import the reference model
 // (spec). "Outside tests" in the rule means: no non-test file of any other
 // package, production or not, imports it. Test files may import both packages.
-// internal/testinfra is for test files and for the integration tests only.
+// shared/testinfra is for test files and for the integration tests only.
 var (
 	specImporters  = []string{"internal/verify/simulator", "cmd/cpsim", "test/conformance"}
 	infraImporters = []string{"test/integration"}
@@ -170,15 +170,15 @@ func check(pkgs map[string]pkg) problems {
 		}
 	}
 
-	// (d) Nothing outside tests imports spec or internal/testinfra: only the verifiers
+	// (d) Nothing outside tests imports spec or shared/testinfra: only the verifiers
 	// listed above do, in their non-test files.
 	for dir, pk := range pkgs {
 		for _, imp := range pk.imports {
-			switch rel := local(imp); {
-			case rel == spec && !slices.Contains(specImporters, dir):
-				p.add("%s imports %s: only %v and test files may", dir, rel, specImporters)
-			case rel == infra && !slices.Contains(infraImporters, dir):
-				p.add("%s imports %s: only %v and test files may", dir, rel, infraImporters)
+			switch {
+			case local(imp) == spec && !slices.Contains(specImporters, dir):
+				p.add("%s imports %s: only %v and test files may", dir, spec, specImporters)
+			case imp == infra && !slices.Contains(infraImporters, dir):
+				p.add("%s imports %s: only %v and test files may", dir, infra, infraImporters)
 			}
 		}
 	}

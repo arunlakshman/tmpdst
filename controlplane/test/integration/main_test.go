@@ -1,7 +1,7 @@
 //go:build integration
 
 // Package integration runs the real mdscontrolplane binary against real
-// DynamoDB Local, PostgreSQL and S3 (SeaweedFS) from internal/testinfra.
+// DynamoDB Local, PostgreSQL and S3 (SeaweedFS) from shared/testinfra.
 //
 // The binary is built once per test run. Each node is a child process with
 // its own free port and Pebble directory. Its output goes into the test log,
@@ -27,7 +27,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
-	"github.com/manifesterio/mds/controlplane/internal/testinfra"
+	"github.com/manifesterio/mds/shared/testinfra"
 )
 
 const binaryPackage = "github.com/manifesterio/mds/controlplane/cmd/mdscontrolplane"

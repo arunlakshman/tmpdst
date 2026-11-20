@@ -10,8 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/testinfra"
 	s3store "github.com/manifesterio/mds/shared/objectstore/s3"
+	"github.com/manifesterio/mds/shared/testinfra"
 )
 
 // faultTransport wraps the transport of the HTTP client that the S3 SDK uses.

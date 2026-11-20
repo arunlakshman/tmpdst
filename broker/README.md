@@ -39,11 +39,11 @@ Root `make check-modules-standalone` verifies `GOWORK=off go mod tidy` and `go b
 | compile | `go build ./...` |
 | test | unit packages (not the simulation tree `internal/verify/simulator`, not `test/integrationtest`) |
 | sim | `go test ./internal/verify/simulator/...`, then `go run ./cmd/mdssimulator -scenario kafka -seeds 300` |
-| it-hermetic | `go test ./test/integrationtest/` (in-process memstore) |
+| it | `go test -tags integration ./test/integrationtest/` (Podman + Dynamo/S3 + real mdscontrolplane) |
 | risk | change risk score <= 20 (`docs/risk-gate.md`) |
 
 Every `git commit` runs that gate via the pre-commit hook (with mise:
-`mise exec -- make build`). Bypass once:
+`mise exec -- make build`). Podman must be running. Bypass once:
 
 ```bash
 SKIP_BUILD_HOOK=1 git commit ...
@@ -52,14 +52,14 @@ SKIP_BUILD_HOOK=1 git commit ...
 ## Other targets
 
 ```bash
-make test-all      # unit + sim + hermetic it (no lint/risk)
+make test-all      # unit + sim + it (no lint/risk; needs Podman)
+make it            # Podman IT: Dynamo/S3 + real mdscontrolplane (also in build)
 make lint
 make risk-strict
 ```
 
-Podman fullstack tests under `test/integrationtest/` skip unless
-`MDS_DYNAMO_ENDPOINT` and `MDS_S3_ENDPOINT` are set
-(`ops/scripts/it-up.sh`). The import rules for the deterministic packages
+`make it` requires Podman and never skips. Integration tests are under
+`//go:build integration`. The import rules for the deterministic packages
 are checked by `go run github.com/manifesterio/mds/dst/cmd/determinismcheck` (see `ops/scripts/ci-determinism.sh`).
 
 ## Docs

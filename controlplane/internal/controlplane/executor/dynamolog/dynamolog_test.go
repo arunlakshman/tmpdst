@@ -17,8 +17,8 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor/dynamolog"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor/logtest"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
-	"github.com/manifesterio/mds/controlplane/internal/testinfra"
 	"github.com/manifesterio/mds/shared/clock"
+	"github.com/manifesterio/mds/shared/testinfra"
 )
 
 func TestMain(m *testing.M) { testinfra.Main(m) }

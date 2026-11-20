@@ -14,7 +14,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor/dynamolog"
-	"github.com/manifesterio/mds/controlplane/internal/testinfra"
+	"github.com/manifesterio/mds/shared/testinfra"
 )
 
 // tableAdmin wraps a real client. DynamoDB Local cannot be made to fail a

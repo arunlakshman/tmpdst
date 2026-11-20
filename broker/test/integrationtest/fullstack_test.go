@@ -1,46 +1,43 @@
+//go:build integration
+
 package integrationtest
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	s3store "github.com/manifesterio/mds/shared/objectstore/s3"
+	"github.com/manifesterio/mds/shared/testinfra"
 )
 
-// fullStack is brokers over the live machine/gRPC control plane (via newStack)
-// with segment objects in SeaweedFS. Skipped unless MDS_S3_ENDPOINT is
-// set (scripts/it-up.sh prints it). Dynamo is exercised by mdscontrolplane -create and
-// by unit tests of exec.CreateTable; this path's unique coverage is real S3.
+// fullStack starts mdscontrolplane against DynamoDB Local and SeaweedFS from
+// shared/testinfra, and brokers with segment objects in that S3. Never skips.
 func fullStack(t *testing.T) *stack {
 	t.Helper()
-	s3ep := os.Getenv("MDS_S3_ENDPOINT")
-	if s3ep == "" {
-		t.Skip("MDS_S3_ENDPOINT not set (scripts/it-up.sh)")
-	}
+	d := testinfra.DynamoDB(t)
+	s3 := testinfra.S3(t)
+	// Table that does not exist yet so -create-tables creates it (same as
+	// controlplane/test/integration).
+	table := d.Table + "_cp"
+	cp := startCP(t, []string{
+		"-store", "dynamolog",
+		"-dynamo-endpoint", d.Endpoint,
+		"-region", "us-east-1",
+		"-table", table,
+		"-create-tables",
+		"-checkpoint-bucket", s3.Bucket,
+		"-s3-endpoint", s3.Endpoint,
+		"-s3-path-style",
+		"-rank", "0",
+	})
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
-	objs, err := s3store.New(ctx, s3store.Config{Endpoint: s3ep, Bucket: s3store.UniqueBucket(), PathStyle: true})
+	objs, err := s3store.New(ctx, s3store.Config{
+		Endpoint: s3.Endpoint, Bucket: s3.Bucket, PathStyle: true, Region: s3.Region,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := objs.EnsureBucket(ctx); err != nil {
-		t.Fatal(err)
-	}
-	return newStack(t, objs, s3store.Classifier{})
-}
-
-func TestFullStackRoundTrip(t *testing.T) {
-	s := fullStack(t)
-	s.addBrokers(2)
-	create(s)
-	runRoundTrip(t, s)
-}
-
-func TestFullStackKillBroker(t *testing.T) {
-	s := fullStack(t)
-	s.addBrokers(3)
-	create(s)
-	runKill(t, s)
+	return stackAgainst(t, cp.addr, objs, s3store.Classifier{})
 }

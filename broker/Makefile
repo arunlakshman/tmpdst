@@ -1,7 +1,8 @@
 # Project build. `make` / `make build` is the full gate:
-#   fmt, ascii, vet, lint, modernize-check, compile, unit tests, sim, hermetic it,
+#   fmt, ascii, vet, lint, modernize-check, compile, unit tests, sim, Podman it,
 #   Kafka CLI e2e, change risk score.
-# Podman fullstack test/integrationtest tests still Skip unless MDS_*_ENDPOINT are set.
+# Integration tests (make it) need Podman (DynamoDB Local + SeaweedFS via shared/testinfra)
+# and a real mdscontrolplane binary; they are part of build and never skip.
 # The import check for deterministic packages is the determinismcheck tool:
 # go run ./ops/tools/determinismcheck <packages>
 # Toolchain: `mise install` at the repo root (pins in the root mise.toml). The commit hook is
@@ -12,7 +13,7 @@ COVER_UNIT    ?= $(COVER_DIR)/cover-unit.out
 COVER_SIM     ?= $(COVER_DIR)/cover-sim.out
 COVER_IT      ?= $(COVER_DIR)/cover-it.out
 # Optional extra coverprofile(s), comma separated, merged into the risk score input
-# (e.g. coverage from Podman-backed integration tests).
+# (e.g. coverage from additional Podman-backed integration runs).
 RISK_MERGE    ?=
 # Fail threshold; also settable as RISK_THRESHOLD in the environment.
 RISK_THRESHOLD ?= 20
@@ -31,11 +32,11 @@ POSTGRES_IMAGE ?= postgres:17.11-alpine
 # Extra go test args for make it-postgres (CP Postgres tests moved to mds-controlplane; see docs/cp-extraction.md).
 PG_TEST_ARGS  ?=
 
-.PHONY: build compile test sim it-hermetic test-all sim-campaign \
+.PHONY: build compile test sim it test-all sim-campaign \
 	ascii-check lint modernize-check modernize fmt-check vet risk risk-baseline risk-strict \
 	e2e-kafka-cli it-postgres
 
-build: fmt-check ascii-check vet lint modernize-check compile test sim it-hermetic e2e-kafka-cli risk
+build: fmt-check ascii-check vet lint modernize-check compile test sim it e2e-kafka-cli risk
 
 compile:
 	go build ./...
@@ -58,24 +59,25 @@ sim: $(COVER_DIR)/.gitignore
 sim-campaign:
 	go run ./cmd/mdssimulator -scenario kafka -seeds $(SIM_SEEDS)
 
-# Hermetic integration tests (in-process memstore). Fullstack Podman tests
-# in the same package Skip unless MDS_DYNAMO_ENDPOINT + MDS_S3_ENDPOINT are set.
-it-hermetic: $(COVER_DIR)/.gitignore
-	go test -coverprofile=$(COVER_IT) ./test/integrationtest/
+# Integration tests: Podman (shared/testinfra DynamoDB Local + SeaweedFS) and a real
+# mdscontrolplane binary. Fails when Podman is not running; never skips. Part of build.
+it: $(COVER_DIR)/.gitignore
+	@podman info >/dev/null 2>&1 || { echo "make it: Podman is not running (or the Podman socket is not reachable). Start Podman and run again; the integration tests are never skipped." >&2; exit 1; }
+	go test -tags integration -count=1 -timeout 15m -coverprofile=$(COVER_IT) ./test/integrationtest/
 
 # Log tests against a real PostgreSQL in Podman (needs Podman). Not part of build: the Postgres cases skip when MDS_TEST_POSTGRES_DSN is unset.
 it-postgres:
 	POSTGRES_IMAGE=$(POSTGRES_IMAGE) bash ops/scripts/postgres-test.sh $(PG_TEST_ARGS)
 
 # All tests without lint/compile/risk.
-test-all: test sim it-hermetic
+test-all: test sim it
 
 
-# Risk gate: merge unit + sim + hermetic-it coverprofiles.
+# Risk gate: merge unit + sim + it coverprofiles.
 risk:
 	@test -f $(COVER_UNIT) || $(MAKE) test
 	@test -f $(COVER_SIM) || $(MAKE) sim
-	@test -f $(COVER_IT) || $(MAKE) it-hermetic
+	@test -f $(COVER_IT) || $(MAKE) it
 	go run ./cmd/riskscore -profile $(COVER_UNIT) \
 		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(RISK_MERGE),$(comma)$(RISK_MERGE)) \
 		$(RISK_FLAGS)
@@ -95,7 +97,7 @@ risk-strict:
 risk-baseline:
 	@test -f $(COVER_UNIT) || $(MAKE) test
 	@test -f $(COVER_SIM) || $(MAKE) sim
-	@test -f $(COVER_IT) || $(MAKE) it-hermetic
+	@test -f $(COVER_IT) || $(MAKE) it
 	go run ./cmd/riskscore -profile $(COVER_UNIT) \
 		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(RISK_MERGE),$(comma)$(RISK_MERGE)) \
 		-update-baseline

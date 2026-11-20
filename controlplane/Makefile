@@ -1,5 +1,7 @@
 # Build for the MDS control plane. `make` / `make build` is the full gate:
-#   generate (buf: the *.pb.go files and protoc-gen-mdswire), fmt, ascii, vet, lint, modernize, compile, unit tests, determinism, simulation.
+#   generate (buf: the *.pb.go files and protoc-gen-mdswire), fmt, ascii, vet, lint, modernize,
+#   compile, unit tests, determinism, simulation, Podman it.
+# Integration tests (make it) need Podman and are part of build; they never skip.
 # Toolchain: `mise install` at the repo root (pins in the root mise.toml). The commit hook is
 # installed by the root Makefile (make install-hooks).
 
@@ -14,7 +16,7 @@ SIM_SEEDS       ?= 300
 .PHONY: it build compile test proto proto-tools fmt-check vet lint modernize-check modernize \
 	ascii-check determinism sim sim-campaign spec-long test-race generate mutants fuzz
 
-build: generate fmt-check ascii-check vet lint modernize-check compile test determinism sim sim-campaign
+build: generate fmt-check ascii-check vet lint modernize-check compile test determinism sim sim-campaign it
 
 # Generate Go from api/**/*.proto (shared, service, log, options):
 # the *.pb.go files next to them, and, by the plugin ops/tools/protoc-gen-mdswire
@@ -102,9 +104,9 @@ mutants:
 	go run ./ops/tools/mutate $(if $(MUTANT),-only $(MUTANT))
 
 # Integration tests: real DynamoDB Local, PostgreSQL and SeaweedFS (S3) in Podman only
-# (no Docker), started by internal/testinfra. test/integration builds the mdscontrolplane
+# (no Docker), started by shared/testinfra. test/integration builds the mdscontrolplane
 # binary once and runs it as child processes against them. It fails when Podman is not
-# running and never skips. Not part of build. Images are pulled before the container-start
+# running and never skips. Part of build. Images are pulled before the container-start
 # timer; no docker->podman symlink or manual TESTCONTAINERS_* env is required.
 it:
 	@podman info >/dev/null 2>&1 || { echo "make it: Podman is not running (or the Podman socket is not reachable). Start Podman and run again; the integration tests are never skipped." >&2; exit 1; }

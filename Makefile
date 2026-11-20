@@ -7,7 +7,7 @@
 # The commit hook (ops/githooks/pre-commit) runs `make build`.
 # Bypass once: SKIP_BUILD_HOOK=1 git commit ...
 
-.PHONY: all build check-deps test-deps-guard check-modules-standalone generate test sim sim-campaign determinism install-hooks
+.PHONY: all build check-deps test-deps-guard check-modules-standalone generate test it sim sim-campaign determinism install-hooks
 
 # Full verification: every root gate except install-hooks (one-time local setup).
 # Overlaps build on purpose so each named target is exercised.
@@ -49,6 +49,13 @@ test:
 	$(MAKE) -C shared test
 	$(MAKE) -C controlplane test
 	$(MAKE) -C broker test
+
+# Integration tests (Podman required): control plane then broker.
+# Also run from each module's make build (commit hook), so Podman must be up for commits.
+# Each module fails when Podman is down and never skips for a missing backend.
+it:
+	$(MAKE) -C controlplane it
+	$(MAKE) -C broker it
 
 # Targets a module does not have are left out on purpose (the list below names each module).
 # dst has no sim and no sim-campaign. broker has no determinism target: it runs its script.

@@ -31,10 +31,14 @@ The root `Makefile` only calls the `Makefile` of each module, in the order above
 `make build` (and `make all`) also runs `make check-modules-standalone`: each module must
 `go mod tidy` cleanly and `go build ./...` with `GOWORK=off`.
 
-Other root targets: `make generate`, `make test`, `make sim`, `make sim-campaign`,
+Other root targets: `make generate`, `make test`, `make it`, `make sim`, `make sim-campaign`,
 `make determinism`, `make install-hooks`, `make check-deps`, `make check-modules-standalone`.
 
-The commit hook (`ops/githooks/pre-commit`) runs `make build`.
+`make it` runs control-plane then broker integration tests. It needs Podman (DynamoDB Local,
+PostgreSQL and SeaweedFS via `shared/testinfra`). Module `make build` (and thus the commit
+hook) also runs those Podman ITs: controlplane and broker each depend on `it`.
+
+The commit hook (`ops/githooks/pre-commit`) runs `make build` and therefore needs Podman.
 
 ## Binaries
 

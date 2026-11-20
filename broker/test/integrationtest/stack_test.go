@@ -1,3 +1,5 @@
+//go:build integration
+
 package integrationtest
 
 import (
@@ -23,14 +25,13 @@ type stack struct {
 	brokers broker.Config
 }
 
-// newStack used to boot an in-process gRPC control plane. That server now lives
-// in mds-controlplane; hermetic IT that needs it skips until reconnect.
-func newStack(t *testing.T, objs system.ObjectStore, cls objectstore.Classifier) *stack {
+// stackAgainst builds a stack for an already-running control plane address
+// (fullStack wires DynamoDB Local + SeaweedFS).
+func stackAgainst(t *testing.T, cpAddr string, objs system.ObjectStore, cls objectstore.Classifier) *stack {
 	t.Helper()
-	t.Skip("control plane extracted to mds-controlplane; reconnect later")
-	_ = objs
-	_ = cls
-	return nil
+	c := client.New(cpAddr, nil)
+	t.Cleanup(func() { _ = c.Close() })
+	return &stack{t: t, cp: c, objs: objs, objCls: cls}
 }
 
 // addBroker starts a broker on 127.0.0.1:0 and returns it with its address.

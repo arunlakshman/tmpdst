@@ -21,7 +21,7 @@ import (
 	sharedv1 "github.com/manifesterio/mds/controlplane/api/controlplane/shared/v1"
 	cpv1 "github.com/manifesterio/mds/controlplane/api/controlplane/v1"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/executor/sqllog"
-	"github.com/manifesterio/mds/controlplane/internal/testinfra"
+	"github.com/manifesterio/mds/shared/testinfra"
 )
 
 // backend is one log store (with or without S3 checkpoints) for a group of

@@ -5,7 +5,7 @@ package s3store_test
 import (
 	"testing"
 
-	"github.com/manifesterio/mds/controlplane/internal/testinfra"
+	"github.com/manifesterio/mds/shared/testinfra"
 )
 
 func TestMain(m *testing.M) { testinfra.Main(m) }

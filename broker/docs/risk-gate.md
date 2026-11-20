@@ -73,10 +73,10 @@ full list; expect 0 over 20 when the gate is green.
 
 ## Running
 
-    make build          fmt, ascii, vet, lint, compile, unit test, sim, hermetic it, Kafka CLI e2e, risk
+    make build          fmt, ascii, vet, lint, compile, unit test, sim, Podman it, Kafka CLI e2e, risk
     make test           unit packages only (excludes internal/verify/simulator and test/integrationtest)
     make sim            go test ./internal/verify/simulator/...
-    make it-hermetic    go test ./test/integrationtest/ (Docker fullstack Skips without endpoints)
+    make it             go test -tags integration ./test/integrationtest/ (Podman; never skips)
     make risk           change risk score gate on merged unit+sim+it coverprofiles
     make risk-strict    ignore the baseline, print every function, fail on all offenders
     make risk-baseline  rewrite ops/risk-baseline.json (deliberate, reviewable)

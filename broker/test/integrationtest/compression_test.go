@@ -1,3 +1,5 @@
+//go:build integration
+
 package integrationtest
 
 import (
@@ -106,9 +108,7 @@ func checkStoredCodec(ctx context.Context, t *testing.T, cl *kgo.Client, topic s
 	}
 }
 
-func TestCompressionRoundTrip(t *testing.T) { runCompression(t, memStack(t, 2)) }
-
-func TestFullStackCompression(t *testing.T) {
+func TestCompressionRoundTrip(t *testing.T) {
 	s := fullStack(t)
 	s.addBrokers(2)
 	runCompression(t, s)

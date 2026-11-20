@@ -1,3 +1,5 @@
+//go:build integration
+
 package integrationtest
 
 import (
@@ -15,13 +17,6 @@ import (
 	"github.com/manifesterio/mds/broker/internal/broker"
 	"github.com/manifesterio/mds/dst/machine"
 )
-
-func memStack(t *testing.T, brokers int) *stack {
-	t.Helper()
-	s := newStack(t, nil, nil)
-	s.addBrokers(brokers)
-	return s
-}
 
 func waitAcked(t *testing.T, s *sent, n int) {
 	t.Helper()
@@ -48,12 +43,12 @@ func create(s *stack) {
 }
 
 func TestProduceConsumeRoundTrip(t *testing.T) {
-	s := memStack(t, 2)
+	s := fullStack(t)
+	s.addBrokers(2)
 	create(s)
 	runRoundTrip(t, s)
 }
 
-// runRoundTrip is the flow shared with the full-stack test.
 func runRoundTrip(t *testing.T, s *stack) {
 	cl := newClient(t, s.seeds())
 	defer closeClient(cl)
@@ -93,7 +88,8 @@ func runRoundTrip(t *testing.T, s *stack) {
 }
 
 func TestMetadataAndApiVersions(t *testing.T) {
-	s := memStack(t, 2)
+	s := fullStack(t)
+	s.addBrokers(2)
 	create(s)
 	cl := newClient(t, s.seeds()[:1])
 	defer closeClient(cl)
@@ -146,7 +142,8 @@ func TestMetadataAndApiVersions(t *testing.T) {
 }
 
 func TestProduceUnknownTopic(t *testing.T) {
-	s := memStack(t, 1)
+	s := fullStack(t)
+	s.addBrokers(1)
 	create(s)
 	cl := newClient(t, s.seeds(), kgo.UnknownTopicRetries(0), kgo.RecordDeliveryTimeout(10*time.Second))
 	defer closeClient(cl)
@@ -171,7 +168,8 @@ func TestProduceUnknownTopic(t *testing.T) {
 }
 
 func TestListOffsetsRequest(t *testing.T) {
-	s := memStack(t, 1)
+	s := fullStack(t)
+	s.addBrokers(1)
 	create(s)
 	cl := newClient(t, s.seeds())
 	defer closeClient(cl)
@@ -212,12 +210,12 @@ func TestListOffsetsRequest(t *testing.T) {
 // A broker killed in the middle of a produce stream: the client retries via
 // another broker and no acked record is lost or stored twice.
 func TestKillBrokerMidProduce(t *testing.T) {
-	s := memStack(t, 3)
+	s := fullStack(t)
+	s.addBrokers(3)
 	create(s)
 	runKill(t, s)
 }
 
-// runKill needs three brokers; it is shared with the full-stack test.
 func runKill(t *testing.T, s *stack) {
 	cl := newClient(t, s.seeds(), kgo.RetryTimeout(60*time.Second), kgo.RecordDeliveryTimeout(60*time.Second))
 	defer closeClient(cl)
@@ -265,7 +263,7 @@ func runKill(t *testing.T, s *stack) {
 // Stop while a produce sits in the open segment: it is flushed, answered,
 // and the broker exits cleanly.
 func TestGracefulStopFlushesProduce(t *testing.T) {
-	s := newStack(t, nil, nil)
+	s := fullStack(t)
 	s.brokers.BatchWindow = machine.Duration(3 * time.Second)
 	s.addBrokers(1)
 	create(s)
@@ -311,7 +309,7 @@ func TestGracefulStopFlushesProduce(t *testing.T) {
 // The broker's own defaults (16 MiB, 200 ms): a lone produce waits out the
 // fixed window, and is answered right after it.
 func TestDefaultFlushRule(t *testing.T) {
-	s := newStack(t, nil, nil)
+	s := fullStack(t)
 	s.brokers = broker.Config{} // every flush knob at its default
 	s.addBrokers(1)
 	create(s)

@@ -2,7 +2,7 @@
 // state machine of the dst v2 contract (machine.Machine[Input, Output]). It has no locks,
 // goroutines, channels or clock: time comes with each Step, randomness comes from the
 // machine.Env given to New, log writes and reads are outputs, and their answers are inputs.
-// docs/controlplane/rebalance.md is the design; the rule numbers in comments are its own.
+// Rule numbers in comments are the classic-group machine's own; see docs/kafka-compatibility.md.
 //
 // The machine is Standby (it serves nothing), Loading (it reads every group
 // from the log) or Serving. The log holds decisions only. Phases, parked

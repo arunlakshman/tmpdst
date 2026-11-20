@@ -12,7 +12,7 @@ import (
 	"github.com/manifesterio/mds/dst/machine"
 )
 
-// The host (docs/controlplane/rebalance.md section 11). The machine runs in a second
+// The host (docs/kafka-compatibility.md section 11). The machine runs in a second
 // live.Run with its own inbox (Node.groups). Its SubmitCommand goes to the
 // replica inbox as a ControlPlaneDeliver; its SubmitRead as a LocalRead, or as
 // a ControlPlaneDeliver when Fresh. The replica answers to rebalanceFrom, and

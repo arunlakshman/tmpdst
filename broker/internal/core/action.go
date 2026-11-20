@@ -57,7 +57,7 @@ type CloseConn struct {
 }
 
 // PauseReads stops reading from a connection (admission control; see
-// docs/broker/flow-control.md sec. 2). Bytes already received are still processed. In
+// inbox backpressure). Bytes already received are still processed. In
 // production the reader goroutine parks; in simulation the bytes stay in the
 // sender's flow-control window.
 type PauseReads struct{ Conn ConnID }

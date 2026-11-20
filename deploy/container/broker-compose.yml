@@ -1,4 +1,4 @@
-# Real-service test backends (docs/engineering/decisions.md; archive broker/decisions.md row 24). Ports bind to
+# Real-service test backends for integration tests. Ports bind to
 # loopback only. Start with ops/scripts/it-up.sh.
 services:
   # DynamoDB-compatible endpoint over SQLite, in memory: a pristine database

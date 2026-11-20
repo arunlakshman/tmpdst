@@ -68,7 +68,6 @@ outside `../ops/dst/determinism-allow.txt`. `../ops/dst/scripts/ci-determinism.s
 
 - [docs/reference/dst.md](../docs/reference/dst.md) - short public guide
 - [docs/contribute/determinism.md](../docs/contribute/determinism.md) - determinism rules for contributors
-- [docs/engineering/archive/dst/](../docs/engineering/archive/dst/) - lessons, paper, longer v2 notes
 
 ## How to run campaigns
 

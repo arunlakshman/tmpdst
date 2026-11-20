@@ -30,13 +30,8 @@ Kafka feature is present.
 
 ## Engineering
 
-- [Engineering index](engineering/README.md)  -  not required for users
-- [Decisions](engineering/decisions.md)  -  still-true ADR index
-- [Archive](engineering/archive/)  -  frozen pre-launch design notes
-
-Ops and contribute pages may land in parallel with this spine. If a link 404s,
-check the module READMEs or the paths still under `docs/broker/` and
-`docs/controlplane/` until the migration finishes.
+- [Engineering index](engineering/README.md) - not required for users
+- [Decisions](engineering/decisions.md) - still-true ADR index
 
 Determinism CI still reads audit records under `docs/broker/dep-audits/` and
 `docs/controlplane/dep-audits/`. Do not move those paths.

@@ -35,7 +35,7 @@
 //     and the group reads.
 //   - domain/rebalance: the consumer group protocol (join, sync, heartbeat,
 //     leave and so on) as a pure state machine. See docs/architecture.md and
-//     docs/engineering/archive/controlplane/rebalance.md.
+//     docs/kafka-compatibility.md.
 //   - domain/broker: which brokers are alive (leases). Memory only, never logged.
 //   - metadb: the database. It runs commands on schemas, owns the log entry
 //     format, the checkpoint and the state hash.

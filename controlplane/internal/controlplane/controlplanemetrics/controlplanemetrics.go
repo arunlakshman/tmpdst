@@ -53,7 +53,7 @@ func New() *Metrics { return NewWithLogger(nil) }
 
 // NewWithLogger registers every collector on a private registry (plus Go
 // runtime and process collectors). log (default slog.Default) receives one
-// line per CP call and the warnings; see docs/broker/observability.md.
+// line per CP call and the warnings; see docs/operations/observability.md.
 func NewWithLogger(log *slog.Logger) *Metrics {
 	if log == nil {
 		log = slog.Default()

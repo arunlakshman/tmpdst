@@ -15,6 +15,5 @@
 //   - never let iteration over a map decide behavior;
 //   - Events and Actions are plain data; byte slices are immutable once sent.
 //
-// See docs/architecture.md and docs/engineering/decisions.md
-// (deep design: docs/engineering/archive/broker/).
+// See docs/architecture.md and docs/engineering/decisions.md.
 package core

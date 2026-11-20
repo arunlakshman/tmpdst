@@ -320,7 +320,7 @@ func (o *oracle) judgeAcks(model spec.Model, committed map[string]contract.Done)
 //     that hits its deadline, or a reply to a call that does not wait).
 //
 // The log may get a write that the machine gave up (its term ended first),
-// after the machine read the log again (docs/controlplane/rebalance.md section 8). Such a
+// after the machine read the log again (docs/kafka-compatibility.md section 8). Such a
 // write gives no answer to any call, so the checks of answers need no special
 // case. But it can leave the log with other members than the memory of the
 // machine, which does not see it until its next term: the group is "late"

@@ -13,7 +13,7 @@ const (
 	timerRole = machine.TimerID(3)
 )
 
-// One node holds the write role at a time (docs/broker/writer-fencing-design.md). A
+// One node holds the write role at a time (docs/engineering/decisions.md, 48/63). A
 // node becomes the writer by claiming a new epoch in the log (a compare-and-swap
 // on one item), and then it writes a fence entry at the tail. Every entry it
 // writes carries the epoch. A node that loses a slot to a newer epoch, or that

@@ -10,7 +10,7 @@ import (
 )
 
 // These tests check the rebalance model against the rules of
-// docs/controlplane/rebalance.md, so that the machine can later be checked against it.
+// docs/kafka-compatibility.md, so that the machine can later be checked against it.
 
 const sec = machine.NodeTime(machine.Second)
 

@@ -13,5 +13,5 @@
 //
 // The oracle is the control-plane spec (oracle.go is the only file of this
 // package that imports it). See
-// docs/controlplane/simulation.md for what is checked and what is not.
+// docs/contribute/determinism.md for the campaign entry points.
 package simulator

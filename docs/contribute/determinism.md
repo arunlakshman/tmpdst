@@ -43,8 +43,6 @@ where wired.
 ## Simulation campaigns
 
 - Control plane: `make -C controlplane sim-campaign` (or `go run ./cmd/cpsim ...`).
-  Scenarios, seeds, reports, and planted bugs:
-  [archive simulation](../engineering/archive/controlplane/simulation.md).
 - Broker: module `make sim` / `cmd/mdssimulator` (see `broker/README.md`).
 - Library examples: `dst/examples/kvsim` via the `dst` campaign tool.
 
@@ -56,6 +54,3 @@ on purpose.
 
 - Public DST guide: [docs/reference/dst.md](../reference/dst.md)
 - Library README: `dst/README.md`
-- Longer lessons (historical):
-  [archive/dst/lessons.md](../engineering/archive/dst/lessons.md),
-  [archive/broker/lessons.md](../engineering/archive/broker/lessons.md)

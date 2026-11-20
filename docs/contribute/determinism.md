@@ -44,8 +44,7 @@ where wired.
 
 - Control plane: `make -C controlplane sim-campaign` (or `go run ./cmd/cpsim ...`).
   Scenarios, seeds, reports, and planted bugs:
-  [archive simulation](../engineering/archive/controlplane/simulation.md)
-  (stub: [docs/controlplane/simulation.md](../controlplane/simulation.md)).
+  [archive simulation](../engineering/archive/controlplane/simulation.md).
 - Broker: module `make sim` / `cmd/mdssimulator` (see `broker/README.md`).
 - Library examples: `dst/examples/kvsim` via the `dst` campaign tool.
 

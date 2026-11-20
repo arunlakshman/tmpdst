@@ -18,7 +18,7 @@ import (
 	"strings"
 )
 
-const rebuildHint = "go run ./cmd/riskscore -profile <cover.out> -update-baseline   (or: make risk-baseline); review and commit the diff of ../ops/broker/risk-baseline.json"
+const rebuildHint = "go run ../ops/tools/riskscore -profile <cover.out> -baseline ../ops/broker/risk-baseline.json -update-baseline   (or: make risk-baseline); review and commit the diff of ../ops/broker/risk-baseline.json"
 
 // Baseline is the checked-in ratchet file: the offenders that existed when it
 // was generated, with their risk score at that time.
@@ -182,7 +182,7 @@ func applyCoverage(c *config, funcs []*Func) error {
 func writeBaseline(c *config, funcs []*Func) (int, error) {
 	b := Baseline{
 		Threshold: c.threshold,
-		Note:      "Ratchet baseline for cmd/riskscore. Regenerate: " + rebuildHint,
+		Note:      "Ratchet baseline for ops/tools/riskscore. Regenerate: " + rebuildHint,
 		Functions: map[string]float64{},
 	}
 	for _, f := range funcs {

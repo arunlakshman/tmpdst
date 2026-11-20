@@ -78,8 +78,9 @@ risk:
 	@test -f $(COVER_UNIT) || $(MAKE) test
 	@test -f $(COVER_SIM) || $(MAKE) sim
 	@test -f $(COVER_IT) || $(MAKE) it
-	go run ./cmd/riskscore -profile $(COVER_UNIT) \
+	go run ../ops/tools/riskscore -profile $(COVER_UNIT) \
 		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(RISK_MERGE),$(comma)$(RISK_MERGE)) \
+		-baseline ../ops/broker/risk-baseline.json \
 		$(RISK_FLAGS)
 
 comma := ,
@@ -98,8 +99,9 @@ risk-baseline:
 	@test -f $(COVER_UNIT) || $(MAKE) test
 	@test -f $(COVER_SIM) || $(MAKE) sim
 	@test -f $(COVER_IT) || $(MAKE) it
-	go run ./cmd/riskscore -profile $(COVER_UNIT) \
+	go run ../ops/tools/riskscore -profile $(COVER_UNIT) \
 		-merge-profile $(COVER_SIM),$(COVER_IT)$(if $(RISK_MERGE),$(comma)$(RISK_MERGE)) \
+		-baseline ../ops/broker/risk-baseline.json \
 		-update-baseline
 
 include ../make/common.mk

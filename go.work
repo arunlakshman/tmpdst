@@ -5,6 +5,7 @@ use (
 	./shared
 	./controlplane
 	./broker
+	./ops/tools/riskscore
 )
 
 // Some modules still see an old google.golang.org/genproto that has the same packages as the

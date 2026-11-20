@@ -9,6 +9,7 @@ import (
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/domain/rebalance"
 	"github.com/manifesterio/mds/controlplane/internal/controlplane/replica"
 	"github.com/manifesterio/mds/controlplane/internal/runtime"
+	"github.com/manifesterio/mds/controlplane/spec"
 	"github.com/manifesterio/mds/dst/check"
 	"github.com/manifesterio/mds/dst/machine"
 )
@@ -19,11 +20,12 @@ import (
 // client was told before it sent a read, the read must show (see snapshot and
 // checkRead). These bounds need no order of the writes.
 //
-// After the run it replays the log, slot by slot, into the spec
-// (the specModel). The log is the truth about the order of the writes,
-// including the writes whose answer was lost. Then every recorded read must
-// equal the spec at the prefix of the log that the node had applied, and every
-// acked write must be in the log (see verify).
+// After the run it replays the log, slot by slot, into the reference model
+// (a spec.Model). The log is the truth about the order of the writes,
+// including the writes whose answer was lost. So the model needs no "maybe
+// applied" state: a write whose answer was lost is simply in the log or not.
+// Then every recorded read must equal the spec at the prefix of the log that
+// the node had applied, and every acked write must be in the log (see verify).
 type oracle struct {
 	s      *sim
 	acks   []ackRec
@@ -216,12 +218,12 @@ func (o *oracle) verify() {
 	s := o.s
 	end, _ := s.store.logEnd()
 	s.check().NoHole(s.store)
-	spec := newSpec()
+	var model spec.Model = spec.New()
 	slices.SortStableFunc(o.reads, func(a, b readRec) int { return cmp.Compare(a.prefix, b.prefix) })
 	next := 0
 	judge := func(prefix runtime.LogPosition) {
 		for next < len(o.reads) && o.reads[next].prefix == prefix {
-			o.judgeRead(spec, o.reads[next], end)
+			o.judgeRead(model, o.reads[next], end)
 			next++
 		}
 	}
@@ -237,8 +239,8 @@ func (o *oracle) verify() {
 		}
 		return ops, err
 	}
-	apply := func(spec specModel, op runtime.ControlPlaneOperation) {
-		d := spec.Apply(op)
+	apply := func(model spec.Model, op runtime.ControlPlaneOperation) {
+		d := model.Apply(op)
 		if cs, ok := op.(contract.CommitSegment); ok && d.Err == runtime.OK {
 			if _, seen := committed[cs.SegmentKey]; !seen {
 				committed[cs.SegmentKey] = d
@@ -246,21 +248,21 @@ func (o *oracle) verify() {
 		}
 		logged.note(op, d)
 	}
-	if !check.Replay(s.check(), s.store, spec, decode, apply, func(prefix check.Slot) {
+	if !check.Replay(s.check(), s.store, model, decode, apply, func(prefix check.Slot) {
 		logged.slot = runtime.LogPosition(prefix)
 		judge(runtime.LogPosition(prefix))
 	}) {
 		return
 	}
 	for ; next < len(o.reads); next++ {
-		o.judgeRead(spec, o.reads[next], end)
+		o.judgeRead(model, o.reads[next], end)
 	}
-	o.judgeAcks(spec, committed)
-	o.judgeGroups(spec, logged)
+	o.judgeAcks(model, committed)
+	o.judgeGroups(model, logged)
 }
 
 // judgeRead checks that a read equals the spec after the prefix that the node had applied.
-func (o *oracle) judgeRead(spec specModel, r readRec, end runtime.LogPosition) {
+func (o *oracle) judgeRead(model spec.Model, r readRec, end runtime.LogPosition) {
 	s := o.s
 	if !s.verdict(r.prefix <= end, readsAgreeWithSpec, "a node answered %T at slot %d, but the log has only %d slots", r.op, r.prefix, end) {
 		return
@@ -268,13 +270,13 @@ func (o *oracle) judgeRead(spec specModel, r readRec, end runtime.LogPosition) {
 	if r.final {
 		s.verdict(s.store.quietAfter(r.prefix), liveReplicasConverge, "a final read of %T was answered at slot %d, but the log has %d slots", r.op, r.prefix, end)
 	}
-	want := spec.Apply(r.op)
+	want := model.Apply(r.op)
 	s.verdict(sameAnswer(want, r.done.Answer()), readsAgreeWithSpec, "at t=%dms after slot %d, %T: spec says %s, node says %s",
 		r.at/int64(machine.Millisecond), r.prefix, r.op, describeAnswer(want), describeAnswer(r.done.Answer()))
 }
 
 // judgeAcks checks that every acked write is in the log, and gave the answer that the spec gives.
-func (o *oracle) judgeAcks(spec specModel, committed map[string]contract.Done) {
+func (o *oracle) judgeAcks(model spec.Model, committed map[string]contract.Done) {
 	s := o.s
 	for _, a := range o.acks {
 		switch w := a.op.(type) {
@@ -285,11 +287,11 @@ func (o *oracle) judgeAcks(spec specModel, committed map[string]contract.Done) {
 			}
 			s.verdict(sameAnswer(want, a.done.Answer()), ackedWriteHasSpecAnswer, "commit %q: spec says %s, the ack says %s", w.SegmentKey, describeAnswer(want), describeAnswer(a.done.Answer()))
 		case contract.CreateTopic:
-			got := spec.Apply(contract.DescribeTopics{Topics: []string{w.Name}})
+			got := model.Apply(contract.DescribeTopics{Topics: []string{w.Name}})
 			r, _ := got.Resp.(contract.DescribeTopicsResp)
 			s.verdict(len(r.Topics) == 1 && r.Topics[0].Partitions >= w.Partitions, ackedWriteInLog, "create topic %q (%d partitions) was acked, but the spec has %+v", w.Name, w.Partitions, r.Topics)
 		case contract.GroupInstall:
-			got := spec.Apply(contract.DescribeGroup{Group: w.Group})
+			got := model.Apply(contract.DescribeGroup{Group: w.Group})
 			r, _ := got.Resp.(contract.DescribeGroupResp)
 			s.verdict(r.Exists && r.Generation >= w.Generation, ackedWriteInLog, "install of group %q generation %d was acked, but the spec has exists=%v generation=%d", w.Group, w.Generation, r.Exists, r.Generation)
 		}
@@ -513,7 +515,7 @@ func (l *groupLog) note(op runtime.ControlPlaneOperation, d contract.Done) {
 }
 
 // judgeGroups checks the answers of the consumers against the log.
-func (o *oracle) judgeGroups(spec specModel, l *groupLog) {
+func (o *oracle) judgeGroups(model spec.Model, l *groupLog) {
 	s, g := o.s, &o.groups
 	for _, j := range g.joins {
 		in, ok := l.installs[groupGen{j.group, j.gen}]
@@ -541,7 +543,7 @@ func (o *oracle) judgeGroups(spec specModel, l *groupLog) {
 			c.offset.Offset, c.group, c.offset.TopicPartition, c.at/int64(machine.Millisecond)) {
 			continue
 		}
-		got := spec.Apply(contract.OffsetFetch{Group: c.group, Partitions: []contract.TopicPartition{c.offset.TopicPartition}})
+		got := model.Apply(contract.OffsetFetch{Group: c.group, Partitions: []contract.TopicPartition{c.offset.TopicPartition}})
 		r, _ := got.Resp.(contract.OffsetFetchResp)
 		final := int64(-1)
 		if len(r.Offsets) == 1 {

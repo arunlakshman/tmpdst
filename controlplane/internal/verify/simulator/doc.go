@@ -11,7 +11,7 @@
 //   - one seeded random stream (see Rand). Every choice comes from it;
 //   - time moves only when the scheduler takes the next event from the queue.
 //
-// The oracle is the control-plane spec (spec.go is the only file that imports
-// it, from spec). See
+// The oracle is the control-plane spec (oracle.go is the only file of this
+// package that imports it). See
 // docs/controlplane/simulation.md for what is checked and what is not.
 package simulator

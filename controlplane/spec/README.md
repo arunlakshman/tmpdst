@@ -9,8 +9,8 @@ SOSP 2021).
 
 ## The files
 
-- `spec.go`: the `Model` interface, `ControlPlane`, and the rules for topics
-  and segments.
+- `doc.go`: the package doc and the `Model` interface.
+- `topics.go`: `ControlPlane`, and the rules for topics and segments.
 - `groups.go`: the rules for the logged half of consumer groups (`GroupInstall`,
   `GroupAssign`, `GroupRemove`, `OffsetCommit`, `OffsetFetch`, describe, list).
 - `hash.go`: `StateHash`, a hash of the committed segments and the topics. The
@@ -20,7 +20,7 @@ SOSP 2021).
   (join, sync, heartbeat, leave, timers, role changes). It holds a
   `ControlPlane` as its `Store` for the logged half. The rules are in
   `docs/controlplane/rebalance.md`.
-- `spec_test.go`, `hash_test.go`, `rebalance_test.go`: small examples of each rule.
+- `topics_test.go`, `hash_test.go`, `rebalance_test.go`: small examples of each rule.
 
 ## The independence rule
 
@@ -29,7 +29,7 @@ It imports none of `domain`, `metadb`, `engine` or `replica`, and no program of
 the product imports it: `go list -deps ./cmd/mdscontrolplane` does not list it.
 A test that compared the code with itself would prove nothing. Only tests and
 the simulators import the model. The control plane simulator reaches it through
-one file, `internal/verify/simulator/spec.go`. The broker reaches it through
+one file, `internal/verify/simulator/oracle.go`. The broker reaches it through
 `broker/internal/verify/speccheck/specbridge` (checks C1, C2 and C4, and the
 broker simulator) and `speccheck/specsystem` (in-memory runs). This is the one
 control plane spec of the repo.

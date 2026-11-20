@@ -14,4 +14,4 @@ test:
 determinism:
 	bash ../ops/dst/scripts/ci-determinism.sh
 
-include ../make/common.mk
+include ../ops/make/common.mk

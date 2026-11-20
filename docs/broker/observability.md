@@ -9,8 +9,7 @@ Two services, each with a metrics port that serves `/metrics` and `/healthz`:
 | `mdscontrolplane` | `-metrics-addr` | `:9101` | `mdscontrolplane_` |
 
 Common flags: `-run-id` (or `$MDS_RUN_ID`), `-log-level debug|info|warn|error`,
-`-manifest-out`. Pick one run id for the whole experiment and give it to both services and
-to the load generator's output file names; then `run_id` joins every log line, the
+`-manifest-out`. Pick one run id for the whole experiment and give it to both services; then `run_id` joins every log line, the
 `*_build_info` series and the manifests.
 
 ## Logs
@@ -127,10 +126,9 @@ is preceded by an `aws_warn_suppressed` line with the count.
 | `mdscontrolplane_log_checkpoint_slot`, `_checkpoint_age_seconds`, `_checkpoint_bytes`, `_checkpoint_seconds`, `_checkpoint_errors_total` | | | Checkpoints; alert on age above 3 x `CheckpointEvery`. **Not built yet: the code does not export this metric.** |
 | `mdscontrolplane_log_trimmed_slots_total` | counter | | Slots deleted behind the checkpoint (trim is a plain delete, decision 62). **Not built yet: the code does not export this metric.** |
 
-Dashboard (Overview, row "Control plane (log store ...)", `gen_dashboards.py`): slot rate and lost slots; append latency p50/p99;
+Dashboard (Overview, row "Control plane (log store ...)"): slot rate and lost slots; append latency p50/p99;
 commands per slot and entry size; apply lag and standby lag; role changes and the active gauge (the gap fills panel was removed with the gap filler, decision 61); queue depth, queue wait
-and refused requests; checkpoint age, size and errors; fresh reads and tail checks.  Alloy (`cp.alloy`) scrapes each CP host's mdscontrolplane and adds `cp_rank`;
-CloudWatch DynamoDB metrics (`cpcloudwatch.alloy`, now with PutItem and BatchWriteItem operations) are scraped from rank 0 only.
+and refused requests; checkpoint age, size and errors; fresh reads and tail checks.
 Log events (INFO unless noted): `log_ready` (node, rank, applied slot, role), `log_role` (active true/false, a takeover or
 a step down), `log_no_checkpoint` (WARN, no `-checkpoint-bucket`). The manifest
 gains `store`, `rank`, `takeover_after`, `checkpoint_bucket`. Suggested alerts: `mdscontrolplane_log_blocked` = 1; checkpoint age above 15 min;

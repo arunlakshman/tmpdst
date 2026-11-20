@@ -291,7 +291,7 @@ func serve(f brokerFlags, fs *flag.FlagSet, stderr io.Writer, shutdown <-chan st
 	return nil
 }
 
-// manifestTuning is the manifest's "tuning" object (keys are read by the runbook).
+// manifestTuning is the manifest's "tuning" object.
 func manifestTuning(config production.NodeConfig, f brokerFlags, mem uint64, memSource, adv string, ln net.Listener) map[string]any {
 	bc := config.Broker
 	return map[string]any{

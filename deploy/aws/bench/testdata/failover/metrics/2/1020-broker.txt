@@ -1,3 +1,0 @@
-mdsbroker_segment_seal_to_ack_seconds_count 300
-mdsbroker_segments_committed_total 300
-mdsbroker_segment_committed_bytes_total 300000000

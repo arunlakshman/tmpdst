@@ -19,8 +19,8 @@ SIM_SEEDS       ?= 300
 build: generate fmt-check ascii-check vet lint modernize-check compile test determinism sim sim-campaign it
 
 # Generate Go from api/**/*.proto (shared, service, log, options):
-# the *.pb.go files next to them, and, by the plugin ops/controlplane/tools/protoc-gen-mdswire
-# (buf runs it with go run via controlplane/ops/tools symlink), the contract value types and the wire converters.
+# the *.pb.go files next to them, and, by the plugin ops/tools/protoc-gen-mdswire
+# (buf runs it with go run from this module), the contract value types and the wire converters.
 # None of it is in git.
 proto: proto-tools
 	@if command -v mise >/dev/null 2>&1; then \
@@ -99,7 +99,7 @@ spec-long:
 # command. A bug the tests do not see fails the target, and so does a mutant whose
 # old text is no longer in the code exactly once. Not part of build.
 # One mutant: make mutants MUTANT=writer-offsets
-# mutate source lives under ops/controlplane/tools; controlplane/ops/tools/mutate is a symlink for go run.
+# The mutate tool is in ops/tools/mutate in this module.
 MUTANT ?=
 mutants:
 	go run ./ops/tools/mutate -file ../ops/controlplane/mutants.txt $(if $(MUTANT),-only $(MUTANT))
@@ -117,4 +117,4 @@ it:
 		./internal/controlplane/executor/dynamolog/... \
 		./internal/controlplane/executor/sqllog/...
 
-include ../make/common.mk
+include ../ops/make/common.mk

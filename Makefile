@@ -3,7 +3,7 @@
 # `make build` is the full gate. It ends by building the two binaries into bin/.
 # `make all` runs every root verification target (not install-hooks).
 # Toolchain and commit hook: `mise install` (pins in mise.toml; postinstall runs make install-hooks).
-# Rules shared by the modules (fmt-check, vet, lint, modernize, ascii-check) are in make/common.mk.
+# Rules shared by the modules (fmt-check, vet, lint, modernize, ascii-check) are in ops/make/common.mk.
 # The commit hook (ops/githooks/pre-commit) runs `make build`.
 # Bypass once: SKIP_BUILD_HOOK=1 git commit ...
 

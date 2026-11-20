@@ -104,4 +104,4 @@ risk-baseline:
 		-baseline ../ops/broker/risk-baseline.json \
 		-update-baseline
 
-include ../make/common.mk
+include ../ops/make/common.mk

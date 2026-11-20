@@ -10,7 +10,7 @@ reach them (`ops/scripts/ci-determinism.sh` is green), so none needs a per-modul
 ## The 16 modules
 
 "Linked" is from `go version -m` of the release build (`CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath ./cmd/mdscontrolplane`,
-the build `deploy/aws/scripts/build-and-upload.sh` makes). None is linked into `mdsbroker`.
+the release build). None is linked into `mdsbroker`.
 
 | module | version | license (module cache LICENSE) | size in cache / non-test go files | linked in release mdscontrolplane |
 |---|---|---|---|---|
@@ -56,8 +56,7 @@ bbolt alternative recorded in `docs/applier-bakeoff.md`; neither is worth it now
 
 - 43 findings are reached, from the standard library of go1.24.0 (net/http, crypto/x509, crypto/tls, ...) plus one module.
   All stdlib ones are fixed in later 1.24.x/1.25 releases: building the release binary with a current patch release
-  removes them. ACTION FOR STAGE 5: pin the build toolchain to the newest patch release (the benchmark host runs the
-  build of the operator's machine) and rerun `govulncheck`.
+  removes them. ACTION FOR STAGE 5: pin the build toolchain to the newest patch release (the release build runs on the operator's machine) and rerun `govulncheck`.
 - One module finding is reached: `golang.org/x/text v0.34.0`, GO-2026-5970 (infinite loop on invalid input in
   `norm.Form.Properties`), fixed in x/text v0.39.0. It is reached only through sentry-go's rate-limit header parsing,
   which mdscontrolplane never runs on untrusted input, so exploitability is nil in practice. Bumping `x/text` to v0.39.0 is a
@@ -75,8 +74,7 @@ bbolt alternative recorded in `docs/applier-bakeoff.md`; neither is worth it now
 - Release toolchain: the newest 1.24 patch, go1.24.13, still shows 25 stdlib findings (1.24 is end of life; fixes are
   only in 1.25.13 and 1.26.9). Building the same code with `GOTOOLCHAIN=go1.26.10` (go.mod unchanged, still `go 1.24.0`)
   and `govulncheck -mode=binary` on linux/amd64 and linux/arm64 gives: mdsbroker, no vulnerabilities; mdscontrolplane, one
-  finding, GO-2026-5970 (x/text v0.34.0, see above). `deploy/aws/scripts/build-and-upload.sh` now defaults
-  `GOTOOLCHAIN` to go1.26.10 (override with the environment).
+  finding, GO-2026-5970 (x/text v0.34.0, see above).
 
 ## Recommendation
 

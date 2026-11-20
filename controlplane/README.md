@@ -43,4 +43,4 @@ See `internal/controlplane/doc.go` for the package map and the mental model, and
 - `test/conformance` - the model conformance tests
 - `test/integration` - end-to-end tests on the real binary (build tag `integration`; Podman via `shared/testinfra`)
 - `test/s3store` - S3 object-store tests against SeaweedFS (build tag `integration`)
-- Module ops live under repo `ops/controlplane/` (scripts, mutants, allow-list). `controlplane/ops/tools/` holds symlinks so `go run ./ops/tools/{mutate,protoc-gen-mdswire}` stays inside the module. The determinism tool is `dst/cmd/determinismcheck`.
+- Module ops live under repo `ops/controlplane/` (scripts, mutants, allow-list). The tools `mutate` and `protoc-gen-mdswire` are in `controlplane/ops/tools/`, so `go run ./ops/tools/{mutate,protoc-gen-mdswire}` stays inside the module. The determinism tool is `dst/cmd/determinismcheck`.

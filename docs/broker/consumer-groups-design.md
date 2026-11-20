@@ -12,15 +12,7 @@ WarpStream facts in this doc are from an internal reverse-engineering note (remo
 
 ## Goal
 
-Stock upstream OpenMessaging Benchmark (OMB) with the Kafka driver must run a produce and consume workload.
-
-- No source patches to OMB. Only the YAML config changes.
-- Today our OMB build has four patches. Each one is a workaround:
-  - mdsBalance pin
-  - static assign
-  - produce-only wait
-  - affine partitioner
-- The goal of this design is to remove the need for these patches.
+A stock Kafka client must run a produce and consume workload with no client changes.
 
 We check the result with the Kafka CLI scripts: `kafka-topics.sh`, `kafka-console-producer.sh`, `kafka-console-consumer.sh` and `kafka-consumer-groups.sh`. We do not use franz-go for this check. We do not use Docker.
 
@@ -53,9 +45,9 @@ Each decision has four parts: the question, the decision, the reason, and the Wa
 
 **Question.** What must work before this is done?
 
-**Decision.** Stock upstream OMB, Kafka driver, YAML config only, produce and consume. Checked with the Kafka CLI scripts (see Goal). `enable.idempotence=false` stays allowed in YAML. Decision 41 stays.
+**Decision.** A stock Kafka client, config only, produce and consume. Checked with the Kafka CLI scripts (see Goal). `enable.idempotence=false` stays allowed in YAML. Decision 41 stays.
 
-**Why.** The four patches show that OMB needs more than the broker has today. A YAML-only run is the test that tells us the gap is closed for real users.
+**Why.** A stock client run with config only is the test that tells us the gap is closed for real users.
 
 **WarpStream.** WarpStream supports stock clients with no client changes. This design aims at the same thing for our own broker.
 
@@ -199,7 +191,7 @@ If two brokers have different live sets for a short time, they may name differen
 - Honor `validateOnly`. It only reads (DescribeTopics) and creates nothing.
 - Pick the supported version range from what the Kafka CLI 3.9.1 uses. Check it in slice 1.
 
-**Why.** The Kafka CLI and OMB both create topics first. Without CreateTopics they need the CP HTTP API, which is not a Kafka path.
+**Why.** The Kafka CLI and other clients both create topics first. Without CreateTopics they need the CP HTTP API, which is not a Kafka path.
 
 **WarpStream.** WarpStream advertises CreateTopics in the range 0 to 7 (reverse-engineering doc, API table).
 
@@ -230,7 +222,7 @@ Each slice ends with a check that can fail. A slice that does not pass is not do
 3. **Fetch long poll.** Add `FetchPollInterval` and `MinBytes` and `MaxWait` honoring (Q8). Done.
 4. **Group log commands, fold and coordinator.** Done. 4a is the state, the log commands, the reads and the tests in the control plane. 4b is the coordinator (timers, rebalance wait, takeover) and the gRPC group calls (see "Group coordinator"). Add the group command kinds, the `G` and `O` keys and the fold (Q5, Q7, Q11). Add them first to the speccheck oracle and the simulator, and test there. The simulator has the trace tags but no group traffic, so its hashes did not change (see "Group log commands").
 5. **Group RPCs and FindCoordinator on brokers. Done.** Forward group calls to the CP (Q3). Test with `kafka-console-consumer.sh --group` and `kafka-consumer-groups.sh --describe`. See "Group APIs on the broker".
-6. **OMB run.** Run OMB with YAML only (Q1). Tracked in MDS-11 (MDS-14).
+6. **Stock client run.** Run a stock Kafka client with config only (Q1). Tracked in MDS-11 (MDS-14).
 
 **Status.** Slice 1 is done. CreateTopics (Q10) is served for versions 0 to 7, and the broker checks it with `ops/scripts/e2e-kafka-cli.sh`. `kafka-topics.sh --describe` also calls DescribeConfigs, so that is served for topics too, with empty configs. The control plane gets one new operation, `core.CreateTopic`. Its `FailIfExists` flag makes the create exclusive: the control plane checks that the topic is new and creates it in one step, and an existing topic gets ErrTopicExists. Each create is one control plane call, with no describe first, so the race is closed. Two creates of one new name cannot both succeed. One case is left: a retry after a lost reply that finds the topic counts as success, because the first try probably made it. A create by another client at the same moment is the same case, and then both can report success.
 

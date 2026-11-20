@@ -1,4 +1,4 @@
-# Mutants for make mutants (see ops/controlplane/tools/mutate).
+# Mutants for make mutants (see controlplane/ops/tools/mutate).
 #
 # A mutant is one exact text replacement in one real source file. The tool applies
 # it to a copy of the tree and runs the test command. The mutant is killed when

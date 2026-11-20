@@ -15,5 +15,3 @@ bin
 
 **/*.pb.go
 **/*_gen.go
-
-deploy/aws

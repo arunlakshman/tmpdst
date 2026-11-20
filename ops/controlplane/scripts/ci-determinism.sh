@@ -16,7 +16,7 @@
 #   2. Every third-party module they depend on has a reviewed audit record
 #      for the exact version in go.mod (so a version bump forces a re-audit).
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../../controlplane"
 
 pkgs=(
   ./internal/runtime/...
@@ -33,12 +33,12 @@ pkgs=(
 sim=./internal/verify/simulator
 
 echo "== determinismcheck"
-go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ops/determinism-allow.txt "${pkgs[@]}"
+go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ../ops/controlplane/determinism-allow.txt "${pkgs[@]}"
 
 echo "== determinismcheck (simulator engine)"
 allow=$(mktemp)
 trap 'rm -f "$allow"' EXIT
-cat ops/determinism-allow.txt >"$allow"
+cat ../ops/controlplane/determinism-allow.txt >"$allow"
 echo context >>"$allow"
 go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow "$allow" "$sim"
 

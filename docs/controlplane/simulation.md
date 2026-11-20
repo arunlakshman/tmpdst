@@ -266,7 +266,7 @@ report and the campaign line. `TestSameSeedSameHash` runs each seed twice (and
 once on 8 goroutines) and requires the same hash. Running `make sim-campaign`
 twice prints the same hash for each scenario; this also holds across processes,
 which have different map iteration orders. The engine is in the determinism
-gate (`ops/scripts/ci-determinism.sh`): no goroutines, no map ranges, no
+gate (`ops/controlplane/scripts/ci-determinism.sh`): no goroutines, no map ranges, no
 imports outside the allow-list (plus `context`). The campaign runner
 (`cmd/cpsim`, on `dst/campaign`) uses goroutines to run seeds in parallel
 and the wall clock only to print the duration; it is not in the gate.
@@ -310,7 +310,7 @@ A simulator that cannot find a planted bug cannot be trusted. `-bug` plants one:
 `TestPlantedBugsAreFound` requires that each is found within 300 seeds, and
 `TestCleanRunHasNoFalseAlarm` that the same seeds pass without the bug.
 
-Three bugs of the rebalance machine are text mutants in `ops/mutants.txt`, run
+Three bugs of the rebalance machine are text mutants in `ops/controlplane/mutants.txt`, run
 by `make mutants`, and `TestScenariosPass` kills each. They show only under
 faults (the basic scenario passes with each of them):
 

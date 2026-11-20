@@ -133,7 +133,7 @@ The SQL tests need a real PostgreSQL. They need Docker.
 make it-postgres
 ```
 
-This starts `postgres:17.11-alpine` in Docker (script `ops/scripts/postgres-test.sh`),
+This starts `postgres:17.11-alpine` in Docker (script `ops/broker/scripts/postgres-test.sh`),
 runs the tests, and removes the container. Set `POSTGRES_KEEP=1` to keep the container
 after the run. Pass extra `go test` arguments with `PG_TEST_ARGS`.
 

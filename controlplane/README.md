@@ -23,7 +23,7 @@ Run: `go run ./cmd/mdscontrolplane`. From the repo root, `make build` also write
 - `make generate` - the generated files from the `.proto` files.
 - `make test-race` - the tests under the race detector (`RACE_RUNS=3` repeats them).
 - `make sim-campaign` - the simulation campaign, 300 seeds of each scenario (`SIM_SEEDS=5000` for more). See `docs/controlplane/simulation.md`.
-- `make mutants` - plant each bug of `ops/mutants.txt` and require that a test fails.
+- `make mutants` - plant each bug of `../ops/controlplane/mutants.txt` and require that a test fails.
 - `make fuzz` - fuzz the decoders (`FUZZTIME=10s` each).
 - `make spec-long` - the conformance tests with 2000 checks each. See `spec/README.md`.
 - `make it` - Podman-backed integration packages only (`test/integration`, `test/s3store`, dynamolog, sqllog IT, plus `shared/testinfra` smoke). Not ordinary unit tests. Needs Podman on PATH, fails without it, never skips. `shared/testinfra` points testcontainers at the Podman socket; no `docker` symlink or manual `TESTCONTAINERS_*` env is required.
@@ -43,4 +43,4 @@ See `internal/controlplane/doc.go` for the package map and the mental model, and
 - `test/conformance` - the model conformance tests
 - `test/integration` - end-to-end tests on the real binary (build tag `integration`; Podman via `shared/testinfra`)
 - `test/s3store` - S3 object-store tests against SeaweedFS (build tag `integration`)
-- `ops` - tools and scripts (`mutate`, `protoc-gen-mdswire`, the mutant list). The determinism tool is `dst/cmd/determinismcheck`.
+- Module ops live under repo `ops/controlplane/` (scripts, mutants, allow-list). `controlplane/ops/tools/` holds symlinks so `go run ./ops/tools/{mutate,protoc-gen-mdswire}` stays inside the module. The determinism tool is `dst/cmd/determinismcheck`.

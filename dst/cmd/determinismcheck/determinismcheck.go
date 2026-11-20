@@ -1,7 +1,7 @@
 // Command determinismcheck enforces the determinism rules of docs/dst/lessons.md (lesson 12)
 // on the deterministic packages of a module (the packages listed in that module's
-// ops/scripts/ci-determinism.sh). One tool serves dst, controlplane and broker. Each module passes
-// its own import allow-list with -allow. The broker's ops/scripts/audit-dep.sh reuses the tool
+// ops/<module>/scripts/ci-determinism.sh). One tool serves dst, controlplane and broker. Each module passes
+// its own import allow-list with -allow. The broker's ops/broker/scripts/audit-dep.sh reuses the tool
 // to audit third-party packages before they are allowed in.
 //
 // It reports:

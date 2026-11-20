@@ -14,7 +14,7 @@ if [[ $# -lt 1 ]]; then
   sed -n '2,9p' "$0"; exit 2
 fi
 
-repo=$(cd "$(dirname "$0")/../.." && pwd)
+repo=$(cd "$(dirname "$0")/../../../broker" && pwd)
 mod_at=$1
 mod=${mod_at%@*}
 pattern=${2:-$mod/...}
@@ -57,7 +57,7 @@ go list -deps -f '{{if not .Standard}}{{.ImportPath}}{{if .Module}}  ({{.Module.
 
 section "determinismcheck findings"
 set +e
-"$work/determinismcheck" -allow "$repo/ops/determinism-allow.txt" "$pattern" 2>&1
+"$work/determinismcheck" -allow "$repo/../ops/broker/determinism-allow.txt" "$pattern" 2>&1
 rc=$?
 set -e
 case $rc in
@@ -82,5 +82,5 @@ cat <<'CHECK'
 [ ] Encode twice / decode twice gives byte-identical / deeply equal results.
 [ ] Every third-party package listed above has its own audit record.
 [ ] Record written: docs/broker/dep-audits/<module>@<version>.md
-[ ] Exact import path(s) added to ops/determinism-allow.txt
+[ ] Exact import path(s) added to ops/broker/determinism-allow.txt
 CHECK

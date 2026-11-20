@@ -16,7 +16,7 @@ import (
 // test wraps a correct replica target with one known fault and asserts that Run
 // FAILS. A pass of the real tests means something only if these tests show that
 // the same property test can find a bug. (Bugs in the code itself are the
-// mutants of ops/mutants.txt.)
+// mutants of ../ops/controlplane/mutants.txt.)
 
 // recorder is a testing.TB that does not fail the real test. rapid reports its
 // failure to the recorder, and the test then checks that it was told.

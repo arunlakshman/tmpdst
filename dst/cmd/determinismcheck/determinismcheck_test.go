@@ -12,7 +12,7 @@ func TestDetcheck(t *testing.T) {
 	// The testdata is checked with the allow list of dst (the same list the old embedded one had).
 	old := allowedImportsFile
 	defer func() { allowedImportsFile = old }()
-	allowedImportsFile = filepath.Join("..", "..", "ops", "determinism-allow.txt")
+	allowedImportsFile = filepath.Join("..", "..", "..", "ops", "dst", "determinism-allow.txt")
 	analysistest.Run(t, analysistest.TestData(), DeterminismAnalyzer, "a")
 }
 

@@ -63,7 +63,7 @@ rebalance tests have their own world and steps (`rebalance_test.go`,
 | `TestDouble*` | Two known faults of the environment: a crash that loses answered writes, and "no data" after a failure. Each test wraps the replica target with the fault and checks that `Run` FAILS. |
 
 The bugs in the code itself are not tests of this kind. They are the mutants of
-`ops/mutants.txt` (`make mutants`): each plants one real bug in a copy of the
+`../ops/controlplane/mutants.txt` (`make mutants`): each plants one real bug in a copy of the
 tree and a named test must fail. The group and topic mutants are killed by
 `TestMetadataMemory`.
 

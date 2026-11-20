@@ -70,7 +70,7 @@ sim-campaign:
 determinism:
 	$(MAKE) -C dst determinism
 	$(MAKE) -C controlplane determinism
-	cd broker && bash ops/scripts/ci-determinism.sh
+	bash ops/broker/scripts/ci-determinism.sh
 
 # Symlink the hook into .git/hooks so every commit runs `make build`.
 # Does not change git config.

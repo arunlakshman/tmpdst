@@ -9,12 +9,12 @@
 #   3. Determinism canary: each seed runs twice and must match, in every
 #      simulator package that implements TestDeterminismCanary (internal/verify/simulator).
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../../broker"
 
 pkgs=(./internal/core/... ./internal/verify/simulator/... ./internal/wire/segmentformat/... ./internal/wire/kafkawire ./internal/broker/... ./spec ./internal/verify/speccheck ./internal/verify/speccheck/specbridge)
 
 echo "== determinismcheck"
-go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ops/determinism-allow.txt "${pkgs[@]}"
+go run github.com/manifesterio/mds/dst/cmd/determinismcheck -allow ../ops/broker/determinism-allow.txt "${pkgs[@]}"
 
 echo "== real time stays out of the gated packages"
 # Only dst/live (the production loop) and the production adapters may read real time
@@ -47,7 +47,7 @@ while read -r modver; do
   if [[ -f $record ]]; then
     echo "ok       $modver"
   else
-    echo "MISSING  $record  (run ops/scripts/audit-dep.sh $modver)"
+    echo "MISSING  $record  (run ../ops/broker/scripts/audit-dep.sh $modver)"
     missing=1
   fi
 done < <(

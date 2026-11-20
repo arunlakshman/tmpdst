@@ -1,4 +1,4 @@
-# Exact import paths the deterministic packages listed in ops/scripts/ci-determinism.sh may import.
+# Exact import paths the deterministic packages listed in ops/dst/scripts/ci-determinism.sh may import.
 # Matching is EXACT. A trailing "/..." also allows every subpackage.
 # Adding a line needs a review that the package is deterministic.
 #

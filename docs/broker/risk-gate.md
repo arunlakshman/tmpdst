@@ -79,7 +79,7 @@ full list; expect 0 over 20 when the gate is green.
     make it             go test -tags integration ./test/integrationtest/ (Podman; never skips)
     make risk           change risk score gate on merged unit+sim+it coverprofiles
     make risk-strict    ignore the baseline, print every function, fail on all offenders
-    make risk-baseline  rewrite ops/risk-baseline.json (deliberate, reviewable)
+    make risk-baseline  rewrite ../ops/broker/risk-baseline.json (deliberate, reviewable)
 
 Flags of `go run ./cmd/riskscore`: `-profile`, `-merge-profile a,b`,
 `-threshold` (env `RISK_THRESHOLD`, default 20), `-baseline`, `-update-baseline`,
@@ -91,7 +91,7 @@ excluded by default. The baseline is empty: the gate fails on any function over
 the threshold.
 
 The determinism gate stays separate. To run it in `make build`, add
-`ops/scripts/ci-determinism.sh` as a step before `risk` in the `build` recipe.
+`../ops/broker/scripts/ci-determinism.sh` as a step before `risk` in the `build` recipe.
 
 ## Reading the output
 
@@ -104,7 +104,7 @@ worse" (baselined, change risk score grew beyond the tolerance).
 
 ## The ratchet
 
-`ops/risk-baseline.json` (currently empty, 0 offenders) lists the functions over
+`../ops/broker/risk-baseline.json` (currently empty, 0 offenders) lists the functions over
 the threshold with their change risk score when it was generated. The gate fails when:
 
 1. a function not in the baseline exceeds the threshold, or
@@ -119,7 +119,7 @@ baseline, the output warns; regenerate it.
 Regenerate deliberately, and commit the diff for review:
 
     make risk-baseline
-    git diff ops/risk-baseline.json
+    git diff ../ops/broker/risk-baseline.json
 
 A diff that only lowers numbers or removes entries is good; a diff that adds
 entries or raises numbers is accepting new debt and needs a reason in the PR.

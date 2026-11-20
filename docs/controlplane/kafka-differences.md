@@ -103,4 +103,4 @@ These are not wire-answer differences (except where said). They are worth knowin
 | R32 hide data outside Stable | `describe.go`, `kafka_test.go` TestDescribeAndList |
 | MEMBER_ID_REQUIRED, static members, SyncGroup check | `join.go`, `sync.go`, the wire types in `api`, the model |
 | Describe or List out of the machine | `describe.go`, `server/groups_handler.go` (one input, Q6/Q9) |
-| Any rule | Update `docs/controlplane/rebalance.md`, the model, the machine test, the mutants in `ops/mutants.txt`, then `make build`, `make mutants`, `make sim-campaign` (hashes may re-pin) |
+| Any rule | Update `docs/controlplane/rebalance.md`, the model, the machine test, the mutants in `ops/controlplane/mutants.txt`, then `make build`, `make mutants`, `make sim-campaign` (hashes may re-pin) |

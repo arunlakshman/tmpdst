@@ -19,8 +19,8 @@ SIM_SEEDS       ?= 300
 build: generate fmt-check ascii-check vet lint modernize-check compile test determinism sim sim-campaign it
 
 # Generate Go from api/**/*.proto (shared, service, log, options):
-# the *.pb.go files next to them, and, by the plugin ops/tools/protoc-gen-mdswire
-# (buf runs it with go run), the contract value types and the wire converters.
+# the *.pb.go files next to them, and, by the plugin ops/controlplane/tools/protoc-gen-mdswire
+# (buf runs it with go run via controlplane/ops/tools symlink), the contract value types and the wire converters.
 # None of it is in git.
 proto: proto-tools
 	@if command -v mise >/dev/null 2>&1; then \
@@ -38,7 +38,7 @@ proto-tools:
 
 # Determinism gate for internal/runtime, the contract and the deterministic domain packages.
 determinism:
-	bash ops/scripts/ci-determinism.sh
+	bash ../ops/controlplane/scripts/ci-determinism.sh
 
 # All generated Go: the *.pb.go files and the contract, rebalance and wire *_gen.go
 # files. One buf run writes all of them (see make proto). None of it is in git,
@@ -95,13 +95,14 @@ sim-campaign:
 spec-long:
 	go test ./test/conformance -count=1 -timeout 60m -rapid.checks=2000
 
-# Plant each bug of ops/mutants.txt in a copy of the tree and run its test
+# Plant each bug of ../ops/controlplane/mutants.txt in a copy of the tree and run its test
 # command. A bug the tests do not see fails the target, and so does a mutant whose
 # old text is no longer in the code exactly once. Not part of build.
 # One mutant: make mutants MUTANT=writer-offsets
+# mutate source lives under ops/controlplane/tools; controlplane/ops/tools/mutate is a symlink for go run.
 MUTANT ?=
 mutants:
-	go run ./ops/tools/mutate $(if $(MUTANT),-only $(MUTANT))
+	go run ./ops/tools/mutate -file ../ops/controlplane/mutants.txt $(if $(MUTANT),-only $(MUTANT))
 
 # Integration tests: only Podman-backed packages (not ordinary unit tests). Real DynamoDB
 # Local, PostgreSQL and SeaweedFS (S3) via shared/testinfra. test/integration builds

@@ -61,7 +61,7 @@ Assertions and buggify sites are declared once, in package-level var blocks:
 (`assert.Catalog`, `fault.Sites`), so a campaign can list what was never reached or never fired.
 
 Deterministic packages must not use goroutines, channels, map ranges, package-level state, or imports
-outside `ops/determinism-allow.txt`. `ops/scripts/ci-determinism.sh` lists the packages that are checked.
+outside `../ops/dst/determinism-allow.txt`. `../ops/dst/scripts/ci-determinism.sh` lists the packages that are checked.
 
 ## Docs
 

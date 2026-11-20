@@ -4,7 +4,7 @@
 # Skips the download when the dir already has the tools. Prints the bin dir
 # as the last line.
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../../broker"
 
 KAFKA_VERSION=3.9.1
 KAFKA_TGZ=kafka_2.13-${KAFKA_VERSION}.tgz

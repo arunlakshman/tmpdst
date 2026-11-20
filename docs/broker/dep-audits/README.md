@@ -2,7 +2,7 @@
 
 Every third-party module that the deterministic packages (`internal/core/`, `internal/verify/simulator/`)
 depend on needs a reviewed record here, at exactly
-`docs/broker/dep-audits/<module path>@<version>.md`. `broker/ops/scripts/ci-determinism.sh` fails
+`docs/broker/dep-audits/<module path>@<version>.md`. `ops/broker/scripts/ci-determinism.sh` fails
 CI when one is missing, so a version bump forces a re-audit.
 
 Only modules that the deterministic packages really run are checked. The script does not
@@ -11,7 +11,7 @@ the input/output edge. So grpc, protobuf, genproto and golang.org/x/{net,sys,tex
 record here. Deterministic packages may use the generated API for type definitions only
 (decision 57).
 
-How to produce one: run `ops/scripts/audit-dep.sh <module>@<version>` and follow
+How to produce one: run `ops/broker/scripts/audit-dep.sh <module>@<version>` and follow
 `.claude/skills/audit-go-dependency/SKILL.md`. Use the template below.
 
 ```markdown
@@ -20,7 +20,7 @@ How to produce one: run `ops/scripts/audit-dep.sh <module>@<version>` and follow
 - Date / auditor:
 - Requires Go:
 - Verdict: ACCEPTED | ACCEPTED WITH RULES | REJECTED
-- Import paths allowed (ops/determinism-allow.txt):
+- Import paths allowed (ops/broker/determinism-allow.txt):
 
 ## Findings
 | Finding (file:line) | Matters? | Why |

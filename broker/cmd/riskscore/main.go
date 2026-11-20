@@ -18,7 +18,7 @@ import (
 	"strings"
 )
 
-const rebuildHint = "go run ./cmd/riskscore -profile <cover.out> -update-baseline   (or: make risk-baseline); review and commit the diff of ops/risk-baseline.json"
+const rebuildHint = "go run ./cmd/riskscore -profile <cover.out> -update-baseline   (or: make risk-baseline); review and commit the diff of ../ops/broker/risk-baseline.json"
 
 // Baseline is the checked-in ratchet file: the offenders that existed when it
 // was generated, with their risk score at that time.
@@ -106,7 +106,7 @@ func parseFlags(args []string, stderr io.Writer) (*config, bool) {
 	fs.StringVar(&c.profile, "profile", "", "coverprofile from go test -coverprofile (required)")
 	fs.StringVar(&c.merge, "merge-profile", "", "comma-separated extra coverprofiles to merge (e.g. from Docker-backed integration tests)")
 	fs.Float64Var(&c.threshold, "threshold", envFloat("RISK_THRESHOLD", 20), "fail above this risk score score (env RISK_THRESHOLD)")
-	fs.StringVar(&c.basePath, "baseline", "ops/risk-baseline.json", "ratchet baseline file")
+	fs.StringVar(&c.basePath, "baseline", "../ops/broker/risk-baseline.json", "ratchet baseline file")
 	fs.BoolVar(&c.update, "update-baseline", false, "write the baseline from the current offenders and exit 0")
 	fs.BoolVar(&c.strict, "strict", false, "ignore the baseline: fail on every offender")
 	fs.BoolVar(&c.asJSON, "json", false, "machine-readable output")

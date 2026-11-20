@@ -10,8 +10,8 @@
 // unchanged tree first, so a command that always fails cannot "kill" a mutant,
 // and it refuses a mutant that does not compile.
 //
-// Run it from the repository root: make mutants. The file format is described
-// at the top of ops/mutants.txt.
+// Run it from the controlplane module: make mutants. The file format is described
+// at the top of ops/controlplane/mutants.txt.
 package main
 
 import (
@@ -39,7 +39,7 @@ type mutant struct {
 }
 
 func main() {
-	list := flag.String("file", "ops/mutants.txt", "the mutants file")
+	list := flag.String("file", "../ops/controlplane/mutants.txt", "the mutants file")
 	only := flag.String("only", "", "run only the mutant with this name")
 	timeout := flag.Duration("timeout", 10*time.Minute, "time limit for one test command")
 	flag.Parse()

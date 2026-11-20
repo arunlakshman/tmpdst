@@ -6,12 +6,12 @@
 # Override CP source with MDS_CONTROLPLANE_DIR. Part of `make build` via
 # e2e-kafka-cli. Pass flags with `make e2e-kafka-cli E2E_ARGS=-v`. See --help.
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../../broker"
 
 usage() {
   cat <<'EOF'
-Usage: ops/scripts/e2e-kafka-cli.sh [-v] [--keep]
-       ops/scripts/e2e-kafka-cli.sh -h
+Usage: ops/broker/scripts/e2e-kafka-cli.sh [-v] [--keep]
+       ops/broker/scripts/e2e-kafka-cli.sh -h
 
 Runs mdscontrolplane (folder ../controlplane, or MDS_CONTROLPLANE_DIR),
 three mdsbrokers and a local minio (S3) from this tree, then runs the checks
@@ -753,7 +753,7 @@ main() {
   fi
 
   # Last line of the fetch output is the bin dir.
-  BIN_DIR=$(bash ops/scripts/fetch-kafka-cli.sh | tail -n 1)
+  BIN_DIR=$(bash ../ops/broker/scripts/fetch-kafka-cli.sh | tail -n 1)
 
   t0=$(now_s)
   if ! start_stack; then

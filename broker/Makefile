@@ -4,7 +4,7 @@
 # Integration tests (make it) need Podman (DynamoDB Local + SeaweedFS via shared/testinfra)
 # and a real mdscontrolplane binary; they are part of build and never skip.
 # The import check for deterministic packages is the determinismcheck tool:
-# go run ./ops/tools/determinismcheck <packages>
+# go run github.com/manifesterio/mds/dst/cmd/determinismcheck <packages>
 # Toolchain: `mise install` at the repo root (pins in the root mise.toml). The commit hook is
 # installed by the root Makefile (make install-hooks).
 
@@ -27,7 +27,7 @@ UNIT_PKGS = $(shell go list ./... | grep -vE '/verify/simulator(/|$$)|/test/inte
 
 export RISK_THRESHOLD
 
-# Image for make it-postgres (pinned; see ops/scripts/postgres-test.sh).
+# Image for make it-postgres (pinned; see ../ops/broker/scripts/postgres-test.sh).
 POSTGRES_IMAGE ?= postgres:17.11-alpine
 # Extra go test args for make it-postgres (CP Postgres tests live in the controlplane module).
 PG_TEST_ARGS  ?=
@@ -67,7 +67,7 @@ it: $(COVER_DIR)/.gitignore
 
 # Log tests against a real PostgreSQL in Podman (needs Podman). Not part of build: the Postgres cases skip when MDS_TEST_POSTGRES_DSN is unset.
 it-postgres:
-	POSTGRES_IMAGE=$(POSTGRES_IMAGE) bash ops/scripts/postgres-test.sh $(PG_TEST_ARGS)
+	POSTGRES_IMAGE=$(POSTGRES_IMAGE) bash ../ops/broker/scripts/postgres-test.sh $(PG_TEST_ARGS)
 
 # All tests without lint/compile/risk.
 test-all: test sim it
@@ -87,13 +87,13 @@ comma := ,
 # E2E: ../controlplane + mdsbroker driven by the Apache Kafka 3.9.1 CLI
 # (needs Java and minio, see mise.toml; part of build). Override with MDS_CONTROLPLANE_DIR.
 e2e-kafka-cli:
-	bash ops/scripts/e2e-kafka-cli.sh $(E2E_ARGS)
+	bash ../ops/broker/scripts/e2e-kafka-cli.sh $(E2E_ARGS)
 
 # Full offender list, ignoring the baseline.
 risk-strict:
 	@$(MAKE) risk RISK_FLAGS="-strict -top 0 $(RISK_FLAGS)"
 
-# Deliberate, reviewable: rewrite ops/risk-baseline.json from the current tree.
+# Deliberate, reviewable: rewrite ../ops/broker/risk-baseline.json from the current tree.
 risk-baseline:
 	@test -f $(COVER_UNIT) || $(MAKE) test
 	@test -f $(COVER_SIM) || $(MAKE) sim

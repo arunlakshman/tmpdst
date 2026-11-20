@@ -15,12 +15,12 @@
 #   POSTGRES_KEEP=1 Do not remove the container at the end. It prints the
 #                   container name and the DSN, so you can connect with psql.
 set -euo pipefail
-cd "$(dirname "$0")/../.."
+cd "$(dirname "$0")/../../../broker"
 
 usage() {
   cat <<'EOF'
-Usage: ops/scripts/postgres-test.sh [go test args...]
-       ops/scripts/postgres-test.sh -h
+Usage: ops/broker/scripts/postgres-test.sh [go test args...]
+       ops/broker/scripts/postgres-test.sh -h
 
 Starts a throwaway PostgreSQL in Podman, runs go test with MDS_TEST_POSTGRES_DSN
 set to that server, then removes the container.

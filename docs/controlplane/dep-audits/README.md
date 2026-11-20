@@ -2,7 +2,7 @@
 
 Every third-party module that the deterministic packages (`internal/runtime/`, `internal/verify/simulator/`)
 depend on needs a reviewed record here, at exactly
-`docs/controlplane/dep-audits/<module path>@<version>.md`. `controlplane/ops/scripts/ci-determinism.sh` fails
+`docs/controlplane/dep-audits/<module path>@<version>.md`. `ops/controlplane/scripts/ci-determinism.sh` fails
 CI when one is missing, so a version bump forces a re-audit.
 
 A module that only test code imports (`pgregory.net/rapid`, in `_test.go` files) needs no record: the gate follows the imports of the deterministic packages, and tests are not in it.
@@ -15,7 +15,7 @@ record here. Deterministic packages may use the generated API for type definitio
 entries with it, so the gate reaches `google.golang.org/protobuf` through `metadb`, and it has
 a record.
 
-How to produce one: run `ops/scripts/audit-dep.sh <module>@<version>` and follow
+How to produce one: run `ops/broker/scripts/audit-dep.sh <module>@<version>` and follow
 `.claude/skills/audit-go-dependency/SKILL.md`. Use the template below.
 
 ```markdown
@@ -24,7 +24,7 @@ How to produce one: run `ops/scripts/audit-dep.sh <module>@<version>` and follow
 - Date / auditor:
 - Requires Go:
 - Verdict: ACCEPTED | ACCEPTED WITH RULES | REJECTED
-- Import paths allowed (ops/determinism-allow.txt):
+- Import paths allowed (ops/controlplane/determinism-allow.txt):
 
 ## Findings
 | Finding (file:line) | Matters? | Why |

@@ -12,6 +12,6 @@ test:
 
 # Determinism gate for the single-goroutine packages (rng, sched, clock, ...).
 determinism:
-	bash ops/scripts/ci-determinism.sh
+	bash ../ops/dst/scripts/ci-determinism.sh
 
 include ../make/common.mk

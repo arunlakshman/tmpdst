@@ -28,10 +28,5 @@ Kafka feature is present.
 - [Glossary](reference/glossary.md)
 - [DST](reference/dst.md)  -  deterministic simulation library
 
-## Engineering
-
-- [Engineering index](engineering/README.md) - not required for users
-- [Decisions](engineering/decisions.md) - still-true ADR index
-
 Determinism CI still reads audit records under `docs/broker/dep-audits/` and
 `docs/controlplane/dep-audits/`. Do not move those paths.

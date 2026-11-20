@@ -69,4 +69,3 @@ Start at [`docs/README.md`](../docs/README.md). Read more:
 - [`docs/what-works-in-0.1.0.md`](../docs/what-works-in-0.1.0.md) - supported Kafka APIs and gaps
 - [`docs/operations/observability.md`](../docs/operations/observability.md) - metrics, logs, `run_id`
 - [`docs/contribute/risk-gate.md`](../docs/contribute/risk-gate.md) - change risk score threshold and baseline
-- [`docs/engineering/decisions.md`](../docs/engineering/decisions.md) - still-true ADR index

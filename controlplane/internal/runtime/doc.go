@@ -17,5 +17,5 @@
 // contract (a public package that the broker also imports). This package imports
 // contract, never the reverse.
 //
-// See docs/contribute/determinism.md and docs/engineering/decisions.md.
+// See docs/contribute/determinism.md and docs/architecture.md.
 package runtime

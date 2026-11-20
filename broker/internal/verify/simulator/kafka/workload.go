@@ -1,7 +1,7 @@
 // Package kafka is the Kafka scenario: sans-I/O Kafka clients (at-least-once
 // producers, no idempotence, and consumers over kafkawire), an oracle that rebuilds each
 // partition's committed log from the control plane and object store truth, the
-// invariants over it, and the campaign preset. See docs/engineering/decisions.md.
+// invariants over it, and the campaign preset. See docs/architecture.md.
 package kafka
 
 import (

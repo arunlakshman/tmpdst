@@ -66,6 +66,6 @@ are checked by `go run github.com/manifesterio/mds/dst/cmd/determinismcheck` (se
 
 Start at [`docs/README.md`](../docs/README.md). Read more:
 
-- [`docs/what-works-in-0.1.0.md`](../docs/what-works-in-0.1.0.md) - supported Kafka APIs and gaps
+- [`docs/architecture.md`](../docs/architecture.md) - runtime and Kafka surface
 - [`docs/operations.md`](../docs/operations.md) - run, metrics, deploy
 - [`docs/contribute/build.md`](../docs/contribute/build.md) - build gate and risk score

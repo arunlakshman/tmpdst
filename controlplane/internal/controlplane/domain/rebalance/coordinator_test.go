@@ -84,7 +84,7 @@ func TestSessionExpiryRemovesSilentMember(t *testing.T) {
 }
 
 // TestHeartbeatTable checks rule 25 in every state. Changed on purpose
-// (docs/what-works-in-0.1.0.md section 6): "completing and right" is OK, as in Kafka.
+// (docs/architecture.md section 6): "completing and right" is OK, as in Kafka.
 func TestHeartbeatTable(t *testing.T) {
 	h := newHarness(t, Config{})
 	a := h.id(1)

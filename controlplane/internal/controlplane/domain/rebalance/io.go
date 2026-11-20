@@ -16,7 +16,7 @@ type CallID uint64
 // into wire_types_gen.go. The inputs below carry a call id, so they are written
 // by hand.
 
-// Input is the input of the machine: a sealed sum of the cases below (docs/what-works-in-0.1.0.md
+// Input is the input of the machine: a sealed sum of the cases below (docs/architecture.md
 // section 3), TimerFired and the private drainLater. Every case has a Tag and a Fold method
 // (fold.go), so a new case without them does not compile.
 //
@@ -39,7 +39,7 @@ type Output interface {
 	isOutput()
 }
 
-// The inputs (docs/what-works-in-0.1.0.md section 3).
+// The inputs (docs/architecture.md section 3).
 type (
 	// Join is a JoinGroup call. An empty MemberID asks for a new member.
 	// RebalanceTimeoutMs 0 means the session timeout.

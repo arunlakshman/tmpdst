@@ -11,4 +11,4 @@
 
 ### Known limitations
 
-See [docs/what-works-in-0.1.0.md](docs/what-works-in-0.1.0.md) for the supported Kafka API surface and intentional gaps.
+See [docs/architecture.md](docs/architecture.md) for the supported Kafka API surface and intentional gaps.

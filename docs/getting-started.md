@@ -68,6 +68,5 @@ Turn off idempotent produce if your client defaults it on
 
 ## Next
 
-- [What works in 0.1.0](what-works-in-0.1.0.md) - APIs, groups, Kafka diffs
-- [Architecture](architecture.md) - how the pieces connect
+- [Architecture](architecture.md) - runtime, Kafka APIs, groups, terms
 - [Operations](operations.md) - flags, metrics, containers

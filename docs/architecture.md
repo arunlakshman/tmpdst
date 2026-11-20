@@ -50,6 +50,62 @@ to the outside world and turns core facts into logs and metrics. That split is
 why DST can drive the same rules the binaries run. See
 [contribute/determinism.md](contribute/determinism.md).
 
+## Kafka protocol surface
+
+If this table disagrees with
+`broker/internal/wire/kafkawire/supported.go`, **the code wins**.
+
+| API | Key | Versions |
+|---|---|---|
+| Produce | 0 | 3 to 9 |
+| Fetch | 1 | 4 to 12 |
+| ListOffsets | 2 | 1 to 7 |
+| Metadata | 3 | 1 to 12 |
+| OffsetCommit | 8 | 0 to 8 |
+| OffsetFetch | 9 | 0 to 8 |
+| FindCoordinator | 10 | 0 to 4 |
+| JoinGroup | 11 | 0 to 7 |
+| Heartbeat | 12 | 0 to 4 |
+| LeaveGroup | 13 | 0 to 5 |
+| SyncGroup | 14 | 0 to 5 |
+| DescribeGroups | 15 | 0 to 5 |
+| ListGroups | 16 | 0 to 4 |
+| ApiVersions | 18 | 0 to 3 |
+| CreateTopics | 19 | 0 to 7 |
+| DescribeConfigs | 32 | 0 to 4 |
+
+FindCoordinator: group keys only. DescribeConfigs: topics only, empty config
+list. Classic groups only (no KIP-848). Compression is opaque bytes (gzip,
+snappy, lz4, zstd accepted; broker never decompresses). Unsupported API
+key/version: connection closed with no error body (ApiVersions still answers
+`UNSUPPORTED_VERSION`).
+
+CreateTopics ignores replication factor and configs. Fetch honors MinBytes /
+MaxWait; no fetch sessions; ListOffsets earliest/latest only; earliest offset
+is 0; no retention delete or compaction in 0.1.0.
+
+### Classic groups
+
+Group state lives in the control plane. FindCoordinator hashes the group name
+(FNV-1a 32-bit) over the sorted live broker list. Transaction keys get
+`COORDINATOR_NOT_AVAILABLE`. Manual OffsetCommit (generation `-1`, no member)
+only when the group has no members. `MEMBER_ID_REQUIRED` is not used.
+
+Intentional diffs vs Apache Kafka classic:
+
+| Topic | Apache Kafka | MDS 0.1.0 |
+|---|---|---|
+| Unchanged follower rejoin in Stable / CompletingRebalance | Often answered at once; leader rejoin starts a round | Any JoinGroup opens a new rebalance immediately |
+| Empty round | Generation advances when Empty | Generation kept |
+| Protocol choice | Vote among shared protocols | First protocol in the leader's list everyone has |
+| Protocol mismatch | Refuse immediately | Park, then end round with `INCONSISTENT_GROUP_PROTOCOL` |
+| SyncGroup | Missing members get empty assignment | Unknown/duplicate assignment is an error |
+| Manual / simple groups | Can create a "simple group" | No group created; Describe Dead; List omits |
+| `MEMBER_ID_REQUIRED` | Challenge then second join | Empty id joins in one step |
+| Static membership | Supported | Instance id stored, unused |
+
+Smoke check: `ops/broker/scripts/e2e-kafka-cli.sh`.
+
 ## Terms (control plane)
 
 Plain one-liners. Code map: `controlplane/internal/controlplane/doc.go`.
@@ -73,5 +129,3 @@ Plain one-liners. Code map: `controlplane/internal/controlplane/doc.go`.
   Kafka consumer group vocabulary; rebalance machine is `domain/rebalance`.
 - **seed** / **campaign** / **oracle** / **trace hash**: one number for a sim run;
   many seeds; post-run checks; digest of every step.
-
-Shipped Kafka surface: [what-works-in-0.1.0.md](what-works-in-0.1.0.md).

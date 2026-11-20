@@ -15,9 +15,10 @@ podman run --rm --name mds-all \
 
 Point a Kafka client at `127.0.0.1:9092`. Full steps, smoke checks, and caveats (in-memory demo only): [docs/getting-started.md](docs/getting-started.md).
 
-## What works in 0.1.0
+## Kafka surface
 
-Supported Kafka APIs, classic groups, and known gaps: [docs/what-works-in-0.1.0.md](docs/what-works-in-0.1.0.md).
+Supported APIs, classic groups, and intentional gaps:
+[docs/architecture.md](docs/architecture.md).
 
 ## Modules and build
 
@@ -33,7 +34,7 @@ make build         # full gate for all modules, then bin/mdscontrolplane and bin
 
 ## Links
 
-- [docs/](docs/) — getting started, what works, architecture, operations, contribute
+- [docs/](docs/) — getting started, architecture, operations, contribute
 - [CONTRIBUTING.md](CONTRIBUTING.md)
 - [CHANGELOG.md](CHANGELOG.md)
 - [LICENSE](LICENSE) (Apache-2.0)

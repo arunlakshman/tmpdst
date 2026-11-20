@@ -5,8 +5,7 @@ Open-source `v0.1.0` docs. Few pages on purpose.
 ## Use
 
 - [Getting started](getting-started.md) - Podman + `mds-all`
-- [What works in 0.1.0](what-works-in-0.1.0.md) - APIs, groups, gaps, Kafka diffs
-- [Architecture](architecture.md) - runtime picture, modules, terms
+- [Architecture](architecture.md) - runtime, Kafka surface, terms
 - [Operations](operations.md) - run, metrics, containers
 
 ## Contribute

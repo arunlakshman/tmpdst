@@ -9,7 +9,7 @@ import (
 )
 
 // Rebalance is the model of the classic consumer group protocol, with the
-// rules of the Apache Kafka classic group coordinator (docs/what-works-in-0.1.0.md). It
+// rules of the Apache Kafka classic group coordinator (docs/architecture.md). It
 // takes one input at a time and has no faults. Deadlines up to the time of an
 // input fire first, earliest first (a tie: group name, then initial delay,
 // round end or sync deadline, sessions by member id). Store, the metadata

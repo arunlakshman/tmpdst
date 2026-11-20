@@ -216,7 +216,7 @@ run go test ./test/conformance -run ^TestRebalanceMachine$ -count=1
 # Request ids start again at each load (a takeover or a broken term), so they
 # repeat in one run of the machine: a late answer of a write of the last term
 # can be taken for the answer of a new request. The host checks that request
-# ids never repeat (docs/what-works-in-0.1.0.md sections 3 and 9).
+# ids never repeat (docs/architecture.md sections 3 and 9).
 mutant rebalance-request-ids-repeat
 file internal/controlplane/domain/rebalance/load.go
 run go test ./internal/verify/simulator -run ^TestScenariosPass$ -count=1

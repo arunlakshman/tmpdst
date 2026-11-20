@@ -10,7 +10,7 @@ import (
 )
 
 // These tests check the rebalance model against the rules of
-// docs/what-works-in-0.1.0.md, so that the machine can later be checked against it.
+// docs/architecture.md, so that the machine can later be checked against it.
 
 const sec = machine.NodeTime(machine.Second)
 

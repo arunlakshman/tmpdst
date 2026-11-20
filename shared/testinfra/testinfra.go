@@ -56,6 +56,7 @@ func (s *service) start(req testcontainers.GenericContainerRequest, port string)
 			s.err = err
 			return
 		}
+		fmt.Fprintf(os.Stderr, "🐳  Pulling %s\n", req.Image)
 		if err := pullImage(req.Image); err != nil {
 			s.err = fmt.Errorf("testinfra: cannot pull %s: %w", req.Image, err)
 			return
@@ -64,6 +65,7 @@ func (s *service) start(req testcontainers.GenericContainerRequest, port string)
 		req.ProviderType = testcontainers.ProviderPodman
 		req.Started = true
 
+		fmt.Fprintf(os.Stderr, "🐳  Starting %s\n", req.Image)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		c, err := testcontainers.GenericContainer(ctx, req)
@@ -87,6 +89,7 @@ func (s *service) start(req testcontainers.GenericContainerRequest, port string)
 			return
 		}
 		s.addr = fmt.Sprintf("%s:%s", host, p.Port())
+		fmt.Fprintf(os.Stderr, "🐳  Ready %s -> %s\n", req.Image, s.addr)
 	})
 	return s.addr, s.err
 }
@@ -124,6 +127,7 @@ func Stop() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	for _, c := range cs {
+		fmt.Fprintln(os.Stderr, "🐳  Stopping container")
 		if err := c.Terminate(ctx); err != nil {
 			fmt.Fprintln(os.Stderr, "testinfra: stop container:", err)
 		}

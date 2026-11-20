@@ -63,7 +63,7 @@ sim-campaign:
 # mdscontrolplane binary. Fails when Podman is not running; never skips. Part of build.
 it: $(COVER_DIR)/.gitignore
 	@podman info >/dev/null 2>&1 || { echo "make it: Podman is not running (or the Podman socket is not reachable). Start Podman and run again; the integration tests are never skipped." >&2; exit 1; }
-	go test -tags integration -count=1 -timeout 15m -coverprofile=$(COVER_IT) ./test/integrationtest/
+	go test -tags integration -count=1 -timeout 15m -v -coverprofile=$(COVER_IT) ./test/integrationtest/
 
 # Log tests against a real PostgreSQL in Podman (needs Podman). Not part of build: the Postgres cases skip when MDS_TEST_POSTGRES_DSN is unset.
 it-postgres:

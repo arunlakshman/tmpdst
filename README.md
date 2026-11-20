@@ -34,9 +34,10 @@ The root `Makefile` only calls the `Makefile` of each module, in the order above
 Other root targets: `make generate`, `make test`, `make it`, `make sim`, `make sim-campaign`,
 `make determinism`, `make install-hooks`, `make check-deps`, `make check-modules-standalone`.
 
-`make it` runs control-plane then broker integration tests. It needs Podman (DynamoDB Local,
-PostgreSQL and SeaweedFS via `shared/testinfra`). Module `make build` (and thus the commit
-hook) also runs those Podman ITs: controlplane and broker each depend on `it`.
+`make it` runs control-plane then broker Podman integration tests (scoped packages only, not
+ordinary unit tests). It needs Podman (DynamoDB Local, PostgreSQL and SeaweedFS via
+`shared/testinfra`). Module `make build` (and thus the commit hook) also runs those Podman
+ITs: controlplane and broker each depend on `it`.
 
 The commit hook (`ops/githooks/pre-commit`) runs `make build` and therefore needs Podman.
 

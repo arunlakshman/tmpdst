@@ -26,7 +26,7 @@ Run: `go run ./cmd/mdscontrolplane`. From the repo root, `make build` also write
 - `make mutants` - plant each bug of `ops/mutants.txt` and require that a test fails.
 - `make fuzz` - fuzz the decoders (`FUZZTIME=10s` each).
 - `make spec-long` - the conformance tests with 2000 checks each. See `spec/README.md`.
-- `make it` - the end-to-end tests on the real binary, against DynamoDB Local, PostgreSQL and SeaweedFS (S3) in Podman only (no Docker). It needs Podman on PATH, fails without it, and never skips. `internal/testinfra` points testcontainers at the Podman socket; no `docker` symlink or manual `TESTCONTAINERS_*` env is required.
+- `make it` - Podman-backed integration packages only (`test/integration`, `test/s3store`, dynamolog, sqllog IT, plus `shared/testinfra` smoke). Not ordinary unit tests. Needs Podman on PATH, fails without it, never skips. `shared/testinfra` points testcontainers at the Podman socket; no `docker` symlink or manual `TESTCONTAINERS_*` env is required.
 
 ## Layout
 
@@ -40,7 +40,7 @@ See `internal/controlplane/doc.go` for the package map and the mental model, and
 - `internal/runtime` - the event and value types and the clock interface
 - `spec` - the small independent model of the control plane, used by tests and by the simulator (public: the broker will import it)
 - `internal/verify/simulator` - deterministic simulation of the replicated control plane
-- `internal/testinfra` - containers for the integration tests
 - `test/conformance` - the model conformance tests
-- `test/integration` - end-to-end tests on the real binary (build tag `integration`)
+- `test/integration` - end-to-end tests on the real binary (build tag `integration`; Podman via `shared/testinfra`)
+- `test/s3store` - S3 object-store tests against SeaweedFS (build tag `integration`)
 - `ops` - tools and scripts (`mutate`, `protoc-gen-mdswire`, the mutant list). The determinism tool is `dst/cmd/determinismcheck`.

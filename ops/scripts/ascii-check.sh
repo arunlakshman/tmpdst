@@ -5,7 +5,10 @@
 # Usage: ascii-check.sh [folder]   (default: the repo root). Only files under the folder are checked.
 set -euo pipefail
 cd "${1:-$(dirname "$0")/../..}"
+# shared/testinfra may use console emoji (pull/start/stop); keep the rest ASCII.
+# Paths may be "shared/testinfra/..." (repo root) or "testinfra/..." (from shared/).
 hits=$(git ls-files '*.go' '*.sh' '*.py' '*.yml' '*.yaml' 'Makefile' \
+  | grep -vE '(^|/)testinfra/' \
   | xargs env LC_ALL=C grep -nI '[^[:print:][:space:]]' || true)
 if [[ -n $hits ]]; then
   echo "non-ASCII characters in code files (use plain ASCII):"

@@ -103,13 +103,17 @@ MUTANT ?=
 mutants:
 	go run ./ops/tools/mutate $(if $(MUTANT),-only $(MUTANT))
 
-# Integration tests: real DynamoDB Local, PostgreSQL and SeaweedFS (S3) in Podman only
-# (no Docker), started by shared/testinfra. test/integration builds the mdscontrolplane
-# binary once and runs it as child processes against them. It fails when Podman is not
-# running and never skips. Part of build. Images are pulled before the container-start
-# timer; no docker->podman symlink or manual TESTCONTAINERS_* env is required.
+# Integration tests: only Podman-backed packages (not ordinary unit tests). Real DynamoDB
+# Local, PostgreSQL and SeaweedFS (S3) via shared/testinfra. test/integration builds
+# mdscontrolplane once and runs it as child processes. Also runs shared/testinfra smoke
+# tests once. Fails when Podman is not running; never skips. Part of build.
 it:
 	@podman info >/dev/null 2>&1 || { echo "make it: Podman is not running (or the Podman socket is not reachable). Start Podman and run again; the integration tests are never skipped." >&2; exit 1; }
-	go test -tags integration -count=1 -timeout 15m ./...
+	$(MAKE) -C ../shared it
+	go test -tags integration -count=1 -timeout 15m -v \
+		./test/integration/... \
+		./test/s3store/... \
+		./internal/controlplane/executor/dynamolog/... \
+		./internal/controlplane/executor/sqllog/...
 
 include ../make/common.mk

@@ -1,7 +1,7 @@
 // Package system is the production seam: narrow interfaces over real I/O that the
 // production Executor calls from goroutines. SDK and HTTP types never leak past
 // an adapter. The simulator does NOT implement these; it implements simulator.Engine
-// over the same Action/Event vocabulary (docs/lessons.md, section 0). The production
+// over the same Action/Event vocabulary (docs/broker/lessons.md, section 0). The production
 // loop is dst/live; this package has its Route function.
 package system
 
@@ -42,7 +42,7 @@ type ErrorClassifier interface {
 }
 
 // InboxWriter is where completions and bytes go. It is the Deliver side of a
-// live.Inbox[core.EventData]: the caller picks the queue (docs/flow-control.md sec. 3).
+// live.Inbox[core.EventData]: the caller picks the queue (docs/broker/flow-control.md sec. 3).
 type InboxWriter interface {
 	// Deliver queues body in the queue of class c. Timer callbacks and I/O
 	// completion goroutines use machine.Control, which never blocks (the queue is

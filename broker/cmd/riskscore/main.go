@@ -1,6 +1,6 @@
 // Command riskscore computes the change risk score of
 // every Go function from cyclomatic complexity and a coverprofile, and fails
-// when a function is too risky. See docs/risk-gate.md.
+// when a function is too risky. See docs/broker/risk-gate.md.
 //
 // Standard library only (dependency-audit policy, decision I).
 package main

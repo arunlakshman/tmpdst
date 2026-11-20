@@ -17,5 +17,5 @@
 // contract (a public package that the broker also imports). This package imports
 // contract, never the reverse.
 //
-// See docs/lessons.md and docs/decisions.md.
+// See docs/broker/lessons.md and docs/broker/decisions.md.
 package runtime

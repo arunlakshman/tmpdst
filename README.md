@@ -56,10 +56,10 @@ Production uses separate `mdscontrolplane` and `mdsbroker` images from the same 
 
 ## Read more
 
-Each module has its own `README.md`.
+Each module has its own `README.md`. Design and reference docs live under `docs/`
+(`docs/broker/`, `docs/controlplane/`, `docs/dst/`).
 
-## Roadmap
+## Follow-ups
 
-- network model - not started
-- disk and crash-state model - not started
-- linearizability checker - not started
+Post-0.1.0 work is tracked in Jira
+[MDS-11](https://manifester-e50593c9.atlassian.net/browse/MDS-11) (post GA 0.1.0 clean up).

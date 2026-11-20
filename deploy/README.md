@@ -12,4 +12,4 @@ All deployment files of the repo are here.
 | `container` | Containerfiles for control plane, broker, and demo all-in-one (`mds-all`); compose file for broker IT backends (Podman). See `container/README.md`. |
 | `helm` | Control plane Helm chart. |
 
-Run order for a benchmark: see `broker/docs/aws-benchmark-runbook.md`.
+Run order for a benchmark: see `deploy/aws/RUNBOOK.md`.

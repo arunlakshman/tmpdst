@@ -1,7 +1,7 @@
 # Run the OMB benchmark on AWS
 
 Stock public OpenMessaging Benchmark (no patches) against 6 `mdsbroker` hosts and 1 control plane host
-(+ standby). The old patched-OMB runbook is `broker/docs/aws-benchmark-runbook.md` (history only).
+(+ standby). The old patched-OMB runbook is `deploy/aws/RUNBOOK.md` (history only).
 
 ## 1. One time on your laptop
     aws sso login --profile hydsandbox

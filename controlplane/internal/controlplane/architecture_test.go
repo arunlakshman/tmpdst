@@ -142,7 +142,7 @@ func check(pkgs map[string]pkg) problems {
 
 	// (b) metadb wires the topic and group contexts together and owns the log entry format,
 	// which is protobuf (the log and shared messages). Its only third-party packages are two of
-	// the protobuf runtime, audited in docs/dep-audits/google.golang.org/protobuf@<version>.md.
+	// the protobuf runtime, audited in docs/controlplane/dep-audits/google.golang.org/protobuf@<version>.md.
 	// It does not know the group protocol machine (rebalance), nor the broker.
 	metadb := cp + "metadb"
 	protobuf := []string{"google.golang.org/protobuf/proto", "google.golang.org/protobuf/reflect/protoreflect"}

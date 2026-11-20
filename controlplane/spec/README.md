@@ -19,7 +19,7 @@ SOSP 2021).
 - `rebalance.go`: `spec.Rebalance`, the model of the classic group protocol
   (join, sync, heartbeat, leave, timers, role changes). It holds a
   `ControlPlane` as its `Store` for the logged half. The rules are in
-  `docs/rebalance.md`.
+  `docs/controlplane/rebalance.md`.
 - `spec_test.go`, `hash_test.go`, `rebalance_test.go`: small examples of each rule.
 
 ## The independence rule

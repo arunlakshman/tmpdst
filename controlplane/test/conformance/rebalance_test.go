@@ -33,7 +33,7 @@ import (
 // never fall on the same instant. The timeouts are also far apart in their low
 // bits, so sums of them rarely meet. When two timers still fall on the same
 // instant, the order of the machine (the order it set them) and of the model
-// (a fixed order of kinds) may differ, and docs/rebalance.md section 12 says
+// (a fixed order of kinds) may differ, and docs/controlplane/rebalance.md section 12 says
 // not to compare that: the check stops there and passes.
 //
 // Failures. A write can be refused (ErrUnavailable, not applied), applied with

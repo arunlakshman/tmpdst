@@ -31,7 +31,7 @@ func (m *Machine) leave(s *serving, in Leave) {
 
 // remove removes the members ids of g. The removal is logged first, unless
 // none of them is in the log: a new member was never installed, so there is
-// nothing to write (docs/rebalance.md section 13).
+// nothing to write (docs/controlplane/rebalance.md section 13).
 func (m *Machine) remove(s *serving, g *group, ids []string, k removeWrite) {
 	k.ids = ids
 	inLog := slices.ContainsFunc(ids, func(id string) bool { return !g.find(id).isNew })

@@ -7,7 +7,7 @@ import (
 )
 
 // The inbox class (machine.Class) selects which of a node's two inboxes an event goes to
-// (docs/flow-control.md sec. 3.1). It is folded into the hash: append-only from here on,
+// (docs/broker/flow-control.md sec. 3.1). It is folded into the hash: append-only from here on,
 // never reordered.
 //
 // Control is the class of things the node caused itself (completions of its own actions,

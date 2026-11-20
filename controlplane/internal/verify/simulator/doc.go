@@ -13,5 +13,5 @@
 //
 // The oracle is the control-plane spec (spec.go is the only file that imports
 // it, from spec). See
-// docs/simulation.md for what is checked and what is not.
+// docs/controlplane/simulation.md for what is checked and what is not.
 package simulator

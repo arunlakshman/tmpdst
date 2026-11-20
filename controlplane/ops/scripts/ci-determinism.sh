@@ -70,7 +70,7 @@ while read -r modver; do
   [[ -z $modver ]] && continue
   # Modules of this repo are first-party code. They need no audit record.
   [[ $modver == github.com/manifesterio/mds/* ]] && continue
-  record="docs/dep-audits/$modver.md"
+  record="../docs/controlplane/dep-audits/$modver.md"
   if [[ -f $record ]]; then
     echo "ok       $modver"
   else

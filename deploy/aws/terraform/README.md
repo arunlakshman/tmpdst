@@ -99,7 +99,7 @@ small latency hop and costs about $0.03/h; set `use_nlb=false` to drop it.
 
 - Terraform >= 1.6, AWS CLI, Go (to build), credentials for the target account.
 - The Session Manager plugin for `aws ssm start-session`.
-- SSM parameters (names are variables, defaults under `/mds-bench/`; full list and how to get the values in `docs/aws-benchmark-runbook.md`):
+- SSM parameters (names are variables, defaults under `/mds-bench/`; full list and how to get the values in `deploy/aws/RUNBOOK.md`):
   `grafana/remote_write_url`, `grafana/user`, `grafana/prom_api_key` and `grafana/loki_api_key` (SecureString; a single combined `grafana/api_key` is accepted as fallback), `grafana/loki_url`, `grafana/loki_user`; optional `grafana/url`, `grafana/annotation_token` (SecureString) for run annotations.
   (SecureString with the default `aws/ssm` key; a customer key needs its own kms:Decrypt grant.)
 

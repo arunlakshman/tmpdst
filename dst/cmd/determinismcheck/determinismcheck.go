@@ -1,4 +1,4 @@
-// Command determinismcheck enforces the determinism rules of docs/lessons.md (lesson 12)
+// Command determinismcheck enforces the determinism rules of docs/dst/lessons.md (lesson 12)
 // on the deterministic packages of a module (the packages listed in that module's
 // ops/scripts/ci-determinism.sh). One tool serves dst, controlplane and broker. Each module passes
 // its own import allow-list with -allow. The broker's ops/scripts/audit-dep.sh reuses the tool
@@ -38,7 +38,7 @@ var allowedImportsFile string
 // DeterminismAnalyzer is the determinismcheck analysis pass.
 var DeterminismAnalyzer = &analysis.Analyzer{
 	Name: "determinismcheck",
-	Doc:  "reports constructs that break deterministic simulation (see docs/lessons.md, lesson 12)",
+	Doc:  "reports constructs that break deterministic simulation (see docs/dst/lessons.md, lesson 12)",
 	Run:  run,
 }
 

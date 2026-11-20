@@ -2,7 +2,7 @@
 // machine and the simulated Kafka clients: stream framing, request/response
 // codec and record-batch (magic v2) helpers. It wraps franz-go's kmsg.
 //
-// Rules, from docs/dep-audits/github.com/twmb/franz-go/pkg/kmsg@v1.14.0.md:
+// Rules, from docs/broker/dep-audits/github.com/twmb/franz-go/pkg/kmsg@v1.14.0.md:
 //
 //   - Framer returns every frame as a fresh slice that it never reuses or
 //     mutates, because decoded kmsg messages alias their input frame (Record

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs Postgres-backed tests against a throwaway PostgreSQL in Podman.
 # Control-plane executor Postgres tests moved to mds-controlplane
-# (docs/cp-extraction.md). Pass package paths explicitly, e.g.:
+# (controlplane module). Pass package paths explicitly, e.g.:
 #   make it-postgres PG_TEST_ARGS='./path/to/pkg/'
 # It starts one container on a free local port, waits until Postgres answers,
 # sets MDS_TEST_POSTGRES_DSN, runs go test, and then removes the container.
@@ -120,7 +120,7 @@ echo "PostgreSQL is ready."
 # (f) Run the tests against that server.
 export MDS_TEST_POSTGRES_DSN="$DSN"
 if [[ $# -eq 0 ]]; then
-  echo "postgres-test: no package args; control-plane Postgres tests moved to mds-controlplane (docs/cp-extraction.md)."
+  echo "postgres-test: no package args; control-plane Postgres tests moved to mds-controlplane (controlplane module)."
   echo "DSN is set for a manual run: $DSN"
   exit 0
 fi

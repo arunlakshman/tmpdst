@@ -29,7 +29,7 @@ export RISK_THRESHOLD
 
 # Image for make it-postgres (pinned; see ops/scripts/postgres-test.sh).
 POSTGRES_IMAGE ?= postgres:17.11-alpine
-# Extra go test args for make it-postgres (CP Postgres tests moved to mds-controlplane; see docs/cp-extraction.md).
+# Extra go test args for make it-postgres (CP Postgres tests live in the controlplane module).
 PG_TEST_ARGS  ?=
 
 .PHONY: build compile test sim it test-all sim-campaign \

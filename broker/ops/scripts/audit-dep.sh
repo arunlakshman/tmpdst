@@ -81,6 +81,6 @@ cat <<'CHECK'
 [ ] No global mutable state: pools, caches, registries written at runtime?
 [ ] Encode twice / decode twice gives byte-identical / deeply equal results.
 [ ] Every third-party package listed above has its own audit record.
-[ ] Record written: docs/dep-audits/<module>@<version>.md
+[ ] Record written: docs/broker/dep-audits/<module>@<version>.md
 [ ] Exact import path(s) added to ops/determinism-allow.txt
 CHECK

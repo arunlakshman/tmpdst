@@ -9,8 +9,7 @@ Module: `github.com/manifesterio/mds/dst`
 
 This module is a folder of the MDS monorepo. It imports no other module of the repo.
 
-A short guide with one example for each part is in [docs/v2.md](docs/v2.md). The design is in
-[docs/v2-design.md](docs/v2-design.md).
+A short guide with one example for each part is in [docs/dst/v2.md](../docs/dst/v2.md).
 
 ## Build
 
@@ -66,10 +65,9 @@ outside `ops/determinism-allow.txt`. `ops/scripts/ci-determinism.sh` lists the p
 
 ## Docs
 
-- [docs/v2.md](docs/v2.md) - a short guide with one small example for each part
-- [docs/v2-design.md](docs/v2-design.md) - the design of v2 and its plan
-- [docs/lessons.md](docs/lessons.md) - one RNG, virtual time, issue-time faults, phases, record-and-continue, Go sans-I/O
-- [docs/paper.md](docs/paper.md) - SOSP'21 ShardStore ideas mapped onto dst
+- [docs/dst/v2.md](../docs/dst/v2.md) - a short guide with one small example for each part
+- [docs/dst/lessons.md](../docs/dst/lessons.md) - one RNG, virtual time, issue-time faults, phases, record-and-continue, Go sans-I/O
+- [docs/dst/paper.md](../docs/dst/paper.md) - SOSP'21 ShardStore ideas mapped onto dst
 
 ## How to run campaigns
 
